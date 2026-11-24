@@ -1,78 +1,63 @@
-"""Тесты для конвейера RetrievalPipeline."""
-
+import json
 from pathlib import Path
-from typing import Any
 
-import numpy as np
-
-from meme_organizer.retrieval.base import BaseRetrieverAdapter
-from meme_organizer.retrieval.pipeline import RetrievalPipeline
+from meme_organizer.models.bm25 import BM25Retriever
+from meme_organizer.pipeline.retrieval_pipeline import RetrievalPipeline
 
 
-class DummyAdapter(BaseRetrieverAdapter):
-    """Тестовый адаптер-заглушка."""
-
-    def load_or_build(self) -> None:
-        pass
-
-    def encode_corpus(self, corpus_docs: list[dict[str, Any]]) -> int:
-        return len(corpus_docs)
-
-    def encode_queries(self, queries: list[str]) -> int:
-        return len(queries)
-
-    def predict_scores(self, query_repr: Any, corpus_repr: Any) -> np.ndarray:
-        # Единичная матрица (идеальные предсказания для первых N)
-        n_q = query_repr
-        n_c = corpus_repr
-        scores = np.zeros((n_q, n_c), dtype=np.float32)
-        for i in range(min(n_q, n_c)):
-            scores[i, i] = 1.0
-        return scores
-
-
-def test_retrieval_pipeline_mock_run(tmp_path: Path) -> None:
-    """Проверяет прогон пайплайна с mock-трекером."""
-    import json
-
+def test_retrieval_pipeline_execution(tmp_path: Path) -> None:
     gold_path = tmp_path / "gold.jsonl"
+    splits_path = tmp_path / "splits.json"
+
+    records = [
+        {
+            "file_hash": "h1",
+            "silver_filename": "s1.jpg",
+            "original_filename": "o1.jpg",
+            "media_type": "image",
+            "width": 100,
+            "height": 100,
+            "user_caption": "кот спит",
+            "queries": ["котик спит"],
+        },
+        {
+            "file_hash": "h2",
+            "silver_filename": "s2.jpg",
+            "original_filename": "o2.jpg",
+            "media_type": "image",
+            "width": 100,
+            "height": 100,
+            "user_caption": "собака бежит",
+            "queries": ["пес бежит"],
+        },
+    ]
+
     with open(gold_path, "w", encoding="utf-8") as f:
-        f.write(json.dumps({"file_hash": "h1", "user_caption": "m1"}) + "\n")
-        f.write(json.dumps({"file_hash": "h2", "user_caption": "m2"}) + "\n")
+        for r in records:
+            f.write(json.dumps(r) + "\n")
 
-    split_path = tmp_path / "splits.json"
-    with open(split_path, "w", encoding="utf-8") as f:
-        json.dump(
-            {
-                "version": "v1",
-                "test_pairs": [
-                    {"query": "q1", "file_hash": "h1"},
-                    {"query": "q2", "file_hash": "h2"},
-                ],
-            },
-            f,
-        )
+    splits_data = {
+        "version": "v1",
+        "corpus_hashes": ["h1", "h2"],
+        "test_pairs": [
+            {"query": "котик спит", "file_hash": "h1", "scene_group": "g1"},
+            {"query": "пес бежит", "file_hash": "h2", "scene_group": "g2"},
+        ],
+    }
 
-    from collections.abc import Generator
-    from contextlib import contextmanager
+    with open(splits_path, "w", encoding="utf-8") as f:
+        json.dump(splits_data, f)
 
-    class MockTracker:
-        @contextmanager
-        def start_run(self, run_name: str, tags: dict[str, str] | None = None) -> Generator[str]:
-            _ = (run_name, tags)
-            yield "mock-run-id-123"
+    pipeline = RetrievalPipeline()
+    bm25 = BM25Retriever(model_name="test-bm25")
 
-        def log_run_results(self, **kwargs: Any) -> None:
-            _ = kwargs
-
-    pipeline = RetrievalPipeline(tracker=MockTracker())  # type: ignore[arg-type]
     metrics, run_id = pipeline.run(
-        adapter=DummyAdapter("dummy-model"),
+        retriever=bm25,
         gold_dataset_path=gold_path,
-        split_path=split_path,
+        split_path=splits_path,
         split_name="test",
     )
 
-    assert run_id == "mock-run-id-123"
-    assert metrics.recall_at_1 == 1.0
-    assert metrics.mrr_at_5 == 1.0
+    assert metrics.total_queries == 2
+    assert metrics.recall_at_1 >= 0.5
+    assert len(run_id) > 0

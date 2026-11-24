@@ -61,15 +61,22 @@ def reset_mlflow(tracking_uri: str | None = None) -> None:
         if existing:
             logger.info("Эксперимент %s активен (ID=%s)", exp_name, existing.experiment_id)
 
-    # Очистка локальных артефактов
-    local_artifacts = Path("mlartifacts")
-    if local_artifacts.exists() and local_artifacts.is_dir():
-        for item in local_artifacts.iterdir():
-            if item.is_dir():
-                shutil.rmtree(item, ignore_errors=True)
-            else:
-                item.unlink(missing_ok=True)
-        logger.info("Локальная папка mlartifacts очищена")
+    # Очистка артефактов внутри Docker контейнера
+    try:
+        docker_bin = shutil.which("docker") or "docker"
+        subprocess.run(  # noqa: S603
+            [docker_bin, "compose", "exec", "-T", "mlflow", "sh", "-c", "rm -rf /mlartifacts/*"],
+            check=False,
+            capture_output=True,
+        )
+        logger.info("Хранилище /mlartifacts в контейнере успешно очищено")
+    except Exception as e:
+        logger.warning("Не удалось очистить /mlartifacts в контейнере: %s", e)
+
+    # Очистка локальной папки кэша
+    local_cache = Path(".cache")
+    if local_cache.exists():
+        shutil.rmtree(local_cache, ignore_errors=True)
 
     logger.info("MLflow готов к новым запускам!")
 

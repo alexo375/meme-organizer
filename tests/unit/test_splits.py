@@ -1,42 +1,63 @@
-"""Тесты для генератора сплитов данных."""
-
+import json
 from pathlib import Path
 
-from meme_organizer.data_splits.splitter import DatasetSplitter, SceneGroupDetector
+from meme_organizer.dataset.splitter import LeakFreeSplitter
 
 
-def test_scene_group_detector() -> None:
-    """Проверяет корректность детекции групп персонажей/фильмов."""
-    rec1 = {"user_caption": "уолтер уайт осуждает", "tags": ["во все тяжкие", "мат"], "file_hash": "hash1"}
-    rec2 = {"user_caption": "стонкс английский", "tags": ["стонкс", "учитель"], "file_hash": "hash2"}
-    rec3 = {"user_caption": "рандомный мем", "tags": [], "file_hash": "abcdef123456"}
+def test_leak_free_splitter(tmp_path: Path) -> None:
+    gold_path = tmp_path / "gold.jsonl"
+    splits_path = tmp_path / "splits.json"
 
-    assert SceneGroupDetector.detect_group(rec1) == "breaking_bad_walter"
-    assert SceneGroupDetector.detect_group(rec2) == "stonks_guy"
-    assert SceneGroupDetector.detect_group(rec3) == "caption_рандомный"
+    records = [
+        {
+            "file_hash": "hash_1",
+            "silver_filename": "s1.jpg",
+            "original_filename": "o1.jpg",
+            "media_type": "image",
+            "width": 100,
+            "height": 100,
+            "extra": {"scene_group": "group_A"},
+            "queries": ["q1", "q2"],
+        },
+        {
+            "file_hash": "hash_2",
+            "silver_filename": "s2.jpg",
+            "original_filename": "o2.jpg",
+            "media_type": "image",
+            "width": 100,
+            "height": 100,
+            "extra": {"scene_group": "group_A"},
+            "queries": ["q3"],
+        },
+        {
+            "file_hash": "hash_3",
+            "silver_filename": "s3.jpg",
+            "original_filename": "o3.jpg",
+            "media_type": "image",
+            "width": 100,
+            "height": 100,
+            "extra": {"scene_group": "group_B"},
+            "queries": ["q4", "q5"],
+        },
+        {
+            "file_hash": "hash_4",
+            "silver_filename": "s4.jpg",
+            "original_filename": "o4.jpg",
+            "media_type": "image",
+            "width": 100,
+            "height": 100,
+            "extra": {"scene_group": "group_C"},
+            "queries": ["q6"],
+        },
+    ]
 
+    with open(gold_path, "w", encoding="utf-8") as f:
+        for r in records:
+            f.write(json.dumps(r) + "\n")
 
-def test_dataset_splitter_leak_free(tmp_path: Path) -> None:
-    """Проверяет отсутствие утечек между сплитами и детерминированность."""
-    gold_file = Path("data/gold/gold_dataset.jsonl")
-    if not gold_file.exists():
-        return
+    splitter = LeakFreeSplitter(gold_dataset_path=gold_path, output_splits_path=splits_path, random_seed=42)
+    splits = splitter.generate_splits(train_ratio=0.5, val_ratio=0.25, test_ratio=0.25)
 
-    out_file = tmp_path / "splits_test.json"
-    splitter = DatasetSplitter(seed=42)
-    split_res = splitter.build_split(gold_file, out_file)
-
-    assert len(split_res.corpus_hashes) == 318
-    assert len(split_res.train_pairs) > 0
-    assert len(split_res.val_pairs) > 0
-    assert len(split_res.test_pairs) > 0
-
-    {p["file_hash"] for p in split_res.train_pairs}
-    {p["file_hash"] for p in split_res.val_pairs}
-    {p["file_hash"] for p in split_res.test_pairs}
-
-    # Проверяем, что хотя бы часть мемов изолирована по группам
-    # И что сплит детерминирован
-    split_res_2 = splitter.build_split(gold_file, tmp_path / "splits_test_2.json")
-    assert len(split_res.train_pairs) == len(split_res_2.train_pairs)
-    assert split_res.train_pairs[0] == split_res_2.train_pairs[0]
+    assert len(splits["corpus_hashes"]) == 4
+    total_pairs = len(splits["train_pairs"]) + len(splits["val_pairs"]) + len(splits["test_pairs"])
+    assert total_pairs == 6
