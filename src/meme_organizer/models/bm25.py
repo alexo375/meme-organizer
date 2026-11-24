@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 from typing import Any
+
 import numpy as np
 from rank_bm25 import BM25Okapi
 
@@ -52,7 +53,8 @@ class BM25Retriever(BaseRetriever):
     def predict_scores(self, query_repr: list[list[str]], corpus_repr: Any) -> np.ndarray:
         """Compute BM25 score matrix for all query-document pairs."""
         _ = corpus_repr
-        assert self.bm25 is not None, "BM25 индекс должен быть инициализирован через encode_corpus"
+        if self.bm25 is None:
+            raise RuntimeError("BM25 индекс должен быть инициализирован через encode_corpus")
 
         scores_list = []
         for q_tokens in query_repr:

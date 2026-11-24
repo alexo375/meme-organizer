@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Any
-import numpy as np
+
 import torch
 from peft import LoraConfig, get_peft_model
 from torch.utils.data import DataLoader, Dataset
+from transformers import AutoModel, AutoTokenizer
 
 from meme_organizer.metrics.ranking import calculate_ranking_metrics
 from meme_organizer.models.dense import DenseTextRetriever
@@ -64,7 +65,7 @@ class FineTunedDenseRetriever(DenseTextRetriever):
         self.lora_r = lora_r
         self.lora_alpha = lora_alpha
 
-    def fit(
+    def fit(  # noqa: PLR0915
         self,
         train_pairs: list[dict[str, str]],
         corpus_docs: list[dict[str, Any]],
@@ -72,6 +73,9 @@ class FineTunedDenseRetriever(DenseTextRetriever):
         tracker: ExperimentTracker | None = None,
     ) -> None:
         """Domain adaptation with LoRA and Multiple Negatives Ranking Loss."""
+        if self._model is None or self._tokenizer is None:
+            self._tokenizer = AutoTokenizer.from_pretrained(self.hf_model_id)
+            self._model = AutoModel.from_pretrained(self.hf_model_id)
         corpus_dict: dict[str, str] = {}
         for d in corpus_docs:
             text = (

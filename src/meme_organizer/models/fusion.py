@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Sequence
+from typing import TYPE_CHECKING
+
 import numpy as np
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 def reciprocal_rank_fusion(

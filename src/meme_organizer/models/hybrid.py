@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Any
-from pathlib import Path
+
 import numpy as np
 
 from meme_organizer.core.contracts import BaseRetriever
@@ -14,6 +14,8 @@ from meme_organizer.models.finetuned_dense import FineTunedDenseRetriever
 from meme_organizer.models.fusion import FusionOptimizer, combine_scores, reciprocal_rank_fusion
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from meme_organizer.core.tracker import ExperimentTracker
 
 logger = logging.getLogger(__name__)
