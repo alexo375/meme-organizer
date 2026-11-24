@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 import logging
 from pathlib import Path
+from typing import Any
 
+from meme_organizer.retrieval.adapters.dense_text import DenseTextRetrieverAdapter
 from meme_organizer.retrieval.baselines.bm25 import BM25RetrieverAdapter
 from meme_organizer.retrieval.pipeline import RetrievalPipeline
 
@@ -19,7 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--model",
         type=str,
         default="bm25",
-        choices=["bm25"],
+        choices=["bm25", "rubert-tiny2", "e5-small"],
         help="Модель для запуска",
     )
     parser.add_argument(
@@ -55,8 +57,23 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
     args = build_parser().parse_args()
 
+    adapter: Any
     if args.model == "bm25":
         adapter = BM25RetrieverAdapter(model_name="bm25-baseline")
+    elif args.model == "rubert-tiny2":
+        adapter = DenseTextRetrieverAdapter(
+            model_name="rubert-tiny2",
+            hf_model_id="cointegrated/rubert-tiny2",
+            max_length=64,
+        )
+    elif args.model == "e5-small":
+        adapter = DenseTextRetrieverAdapter(
+            model_name="multilingual-e5-small",
+            hf_model_id="intfloat/multilingual-e5-small",
+            max_length=64,
+            query_prefix="query: ",
+            passage_prefix="passage: ",
+        )
     else:
         raise ValueError(f"Неизвестная модель: {args.model}")
 

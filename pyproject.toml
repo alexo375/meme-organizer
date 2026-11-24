@@ -11,6 +11,9 @@ dependencies = [
     "fastapi>=0.115.0",
     "google-genai>=1.0.0",
     "mlflow>=3.18.0",
+    "onnx>=1.23.2",
+    "onnxruntime>=1.32.0",
+    "onnxscript>=0.7.2",
     "pillow>=11.0.0",
     "pillow-heif>=0.21.0",
     "psycopg2-binary>=2.9.13",
@@ -18,7 +21,9 @@ dependencies = [
     "pydantic-settings>=2.7.0",
     "rank-bm25>=0.2.2",
     "scikit-learn>=1.9.1",
+    "torch>=2.15.0",
     "tqdm>=4.67.0",
+    "transformers>=5.24.1",
     "uvicorn>=0.30.0",
 ]
 

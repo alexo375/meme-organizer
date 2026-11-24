@@ -23,3 +23,4 @@ data/bronze/
 .vscode/
 .idea/
 .DS_Store
+models/
