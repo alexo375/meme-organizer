@@ -4,7 +4,6 @@ import sys
 from pathlib import Path
 
 from meme_organizer.config import LabelingConfig
-from meme_organizer.curation.server import CurationAppFactory
 from meme_organizer.labeling.gemini_client import GeminiLabeler
 from meme_organizer.labeling.pipeline import BronzeLabelingPipeline
 from meme_organizer.labeling.rate_limiter import RateLimiter
@@ -55,12 +54,6 @@ class LabelingCli:
         )
         norm_cmd.add_argument("--bronze-dir", type=Path, default=None, help="Путь к исходной папке bronze")
 
-        curate_cmd = subparsers.add_parser("curate", help="Запустить локальный UI для доразметки и слияния дублей")
-        curate_cmd.add_argument("--port", type=int, default=8080, help="Порт веб-сервера")
-        curate_cmd.add_argument("--host", type=str, default="127.0.0.1", help="Хост веб-сервера")
-        curate_cmd.add_argument("--silver-dir", type=Path, default=None, help="Путь к silver папке")
-        curate_cmd.add_argument("--gold-dir", type=Path, default=None, help="Путь к gold папке")
-
         return parser
 
     @classmethod
@@ -86,16 +79,6 @@ class LabelingCli:
                 res.errors_count,
             )
             return 1 if res.errors_count else 0
-
-        if args.command == "curate":
-            import uvicorn
-
-            silver_dir = args.silver_dir or config.silver_dir
-            gold_dir = args.gold_dir or config.gold_dir
-            app = CurationAppFactory.create_app(silver_dir, gold_dir)
-            logger.info("Запуск UI доразметки на http://%s:%d", args.host, args.port)
-            uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
-            return 0
 
         return cls._run_label(args, config)
 

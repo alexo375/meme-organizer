@@ -1,6 +1,5 @@
 # Whitelist для vulture: поля Pydantic-моделей, свойства публичного API и атрибуты сторонних библиотек.
 from meme_organizer.config import LabelingConfig
-from meme_organizer.curation.server import CurationAppFactory
 from meme_organizer.labeling.store import LabelingCheckpointStore
 from meme_organizer.media.deduplicator import DuplicateCandidate
 from meme_organizer.schemas.curation import CuratedRecord, CurationStatus

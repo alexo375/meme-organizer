@@ -1,77 +1,60 @@
-# Meme Organizer — Curation Environment
+# Meme Organizer — ML Search & Retrieval Pipeline
 
-Инструмент интерактивной доразметки и верификации датасета реакций и мемов для поиска.
+Репозиторий машинного обучения для мобильного приложения **Meme Organizer** (поиск мемов и реакций на устройстве Android).
 
-Ветка `feat/dataset-curation` содержит пайплайн разметки `silver -> gold`: отбор кандидатов, чистку дублей, редактирование реплик/панчлайнов и экспорт готового датасета.
+Целевой рантайм: Android (ONNX Runtime Mobile, INT8 квантование, RAM < 150 MB, латентность < 50 мс на CPU).
+
+Подробный архитектурный план и правила разработки описаны в [.agents/ROADMAP.md](.agents/ROADMAP.md) и [.agents/GEMINI.md](.agents/GEMINI.md).
 
 ---
 
-## Быстрый запуск
+## 🚀 Быстрый старт инфраструктуры (Docker + MLflow)
 
-### Вариант 1: Через Docker (рекомендуется)
+Для трекинга экспериментов используется **MLflow** с бэкендом **PostgreSQL** в Docker:
 
 ```bash
-docker compose up -d --build
+# Запуск PostgreSQL и MLflow Tracking Server
+docker compose up -d
+
+# Проверка статуса сервисов
+docker compose ps
 ```
+Веб-интерфейс MLflow доступен по адресу: **http://localhost:5000**.
 
-Сервер откроется на **http://localhost:8080**.
-
-Локальная папка `./data` проброшена в контейнер (`./data:/app/data`), все изменения сразу сохраняются на хосте в `data/gold/curation_draft.json`.
-
-Остановить контейнер:
+Остановить сервисы:
 ```bash
 docker compose down
 ```
 
 ---
 
-### Вариант 2: Локально через `uv`
+## 🛠 Локальное окружение (uv)
 
 Требуется Python 3.13 и `uv`:
 
 ```bash
 uv sync
-uv run meme-label curate
 ```
 
----
+### Генерация честного сплита данных (Leak-free)
+```bash
+uv run python -m meme_organizer.data_splits.splitter
+```
+Создает фиксированный сплит `data/splits/splits_v1.json` без утечек связанных мемов (`scene_group`).
 
-## Архитектура датасета
-
-- `data/silver/` — нормализованные медиафайлы (JPEG/PNG/GIF/MP4) с именами в dash-case.
-- `data/silver/labels.jsonl` — базовые аннотации от VLM (подписи, теги, OCR, транскрипты, поисковые запросы).
-- `data/gold/curation_draft.json` — рабочий черновик разметки со статусами (`verified`, `pending`, `rejected`).
-- `data/gold/gold_dataset.jsonl` — финальный датасет, формируемый по кнопке экспорта.
-
----
-
-## Как работать в веб-интерфейсе
-
-1. Переключиться на вкладку **«Ожидают»** (там находятся неразмеченные карточки).
-2. Для каждого мема проверить поля:
-   - **User Caption**: краткий смысл/панчлайн (2–6 слов) без нейроводы (например, *«твой софт говно»*, *«кот в шоке»*).
-   - **Теги**: ключевые сущности мема.
-   - **Цитата / OCR / Текст речи**: точная реплика персонажа или текст на изображении, если они есть.
-   - **Поисковые запросы (Queries)**: фразы, по которым пользователь будет искать этот мем в поиске.
-3. Нажать действие:
-   - **✓ В Gold** — подтвердить карточку (переходит в `verified`).
-   - **✕ Брак** — отсеять мем, если он непонятный, сложный или не подходит для реакций.
-   - **Удалить файл** — физически удалить файл из `data/` и исключить запись из датасета (для битых файлов и дублей).
-4. После завершения всех карточек нажать в шапке **«💾 Экспорт в data/gold/»**.
-5. Закоммитить изменения:
-   ```bash
-   git add data/gold/
-   git commit -m "feat(dataset): complete gold dataset curation"
-   git push origin feat/dataset-curation
-   ```
+### Запуск экспериментов
+```bash
+# Запуск baseline модели (BM25)
+uv run python -m meme_organizer.experiments.run --model bm25
+```
+Все метрики ($MRR@5$, $Recall@1$, $Recall@5$, $NDCG@5$), профили задержки и Top-15 Worst Queries автоматически логируются в MLflow.
 
 ---
 
-## Разработка и проверка кода
-
-В проекте настроены статические проверки качества:
+## 🧪 Тестирование и качество кода
 
 ```bash
-uv run just check-static   # ruff, mypy, vulture, OOP checks, file length checks
-uv run pytest -v           # юнит-тесты
+uv run poe test       # Запуск pytest
+uv run poe lint       # Проверка ruff
+uv run poe typecheck  # Проверка mypy
 ```
