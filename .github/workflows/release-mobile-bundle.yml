@@ -1,0 +1,91 @@
+name: Release Mobile Bundle
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: 'Model profile to package'
+        required: true
+        default: 'text-champion'
+        type: choice
+        options:
+          - 'text-champion'
+          - 'rubert-tiny2-finetuned'
+      tag_name:
+        description: 'Release Tag (e.g. v0.1.0-text-mobile)'
+        required: true
+        default: 'v0.1.0-text-mobile'
+        type: string
+  push:
+    tags:
+      - 'v*-mobile'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          version: "latest"
+
+      - name: Set up Python 3.13
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: |
+          uv sync --frozen || uv sync
+
+      - name: Determine Profile and Tag
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "PROFILE=${{ github.event.inputs.profile }}" >> $GITHUB_OUTPUT
+            echo "TAG=${{ github.event.inputs.tag_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "PROFILE=text-champion" >> $GITHUB_OUTPUT
+            echo "TAG=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build Mobile Delivery Bundle
+        run: |
+          mkdir -p dist/mobile_bundle
+          uv run python scripts/build_mobile_bundle.py --profile "${{ steps.vars.outputs.PROFILE }}" --output-dir dist/mobile_bundle
+
+      - name: Compute Checksum
+        run: |
+          cd dist/mobile_bundle
+          sha256sum *.tar.gz > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create GitHub Release and Upload Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.TAG }}
+          name: "Mobile Delivery Bundle: ${{ steps.vars.outputs.TAG }}"
+          body: |
+            ## 📱 Meme Organizer Mobile Model Bundle
+            
+            - **Profile**: `${{ steps.vars.outputs.PROFILE }}`
+            - **Component**: `text_encoder` (ONNX INT8 + In-graph Pooling & L2 Normalization)
+            - **Target Runtime**: Android ONNX Runtime Mobile
+            
+            ### Included in Archive:
+            - `text_encoder_int8.onnx` — INT8 quantized model (~112 MB)
+            - `tokenizer/` — SentencePiece / HuggingFace tokenizer assets
+            - `preset_manifest.json` — Schema and configuration metadata
+            - `smoke_test_pack.json` — Golden parity test pack for Android JUnit testing
+            - `README.md` — Kotlin integration guide
+          files: |
+            dist/mobile_bundle/*.tar.gz
+            dist/mobile_bundle/SHA256SUMS.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
