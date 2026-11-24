@@ -1,0 +1,15 @@
+repos:
+  - repo: local
+    hooks:
+      - id: just-check-static
+        name: just check-static (lint, format, mypy, vulture, lengths, oop)
+        entry: uv run just check-static
+        language: system
+        pass_filenames: false
+        files: ^(src|tests|scripts)/
+      - id: security-audit
+        name: bandit security audit
+        entry: uv run poe security-audit
+        language: system
+        pass_filenames: false
+        files: ^src/

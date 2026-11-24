@@ -1,0 +1,14 @@
+services:
+  curate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: meme-organizer-curator:latest
+    container_name: meme_organizer_curate
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1

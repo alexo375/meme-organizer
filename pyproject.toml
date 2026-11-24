@@ -1,0 +1,188 @@
+[project]
+name = "meme-organizer"
+version = "0.1.0"
+description = "On-device multimodal ML & retrieval pipeline for Meme Organizer"
+readme = "README.md"
+authors = [
+    { name = "Alexander", email = "alexo375@yandex.ru" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.115.0",
+    "google-genai>=1.0.0",
+    "pillow>=11.0.0",
+    "pillow-heif>=0.21.0",
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.7.0",
+    "tqdm>=4.67.0",
+    "uvicorn>=0.30.0",
+]
+
+[project.scripts]
+meme-label = "meme_organizer.labeling.cli:main"
+
+[dependency-groups]
+dev = [
+    "bandit>=1.8.0",
+    "mypy>=1.15.0",
+    "pip-audit>=2.8.0",
+    "poethepoet>=0.32.0",
+    "pre-commit>=4.0.0",
+    "pytest>=8.3.0",
+    "pytest-cov>=6.0.0",
+    "ruff>=0.9.0",
+    "rust-just>=1.36.0",
+    "types-tqdm>=4.67.0",
+    "vulture>=2.14",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/meme_organizer"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+
+[tool.ruff.lint]
+select = [
+    "E",       # pycodestyle errors
+    "W",       # pycodestyle warnings
+    "F",       # pyflakes
+    "I",       # isort
+    "B",       # flake8-bugbear
+    "UP",      # pyupgrade (modern Python 3.13)
+    "SIM",     # flake8-simplify
+    "RET",     # flake8-return
+    "ARG",     # flake8-unused-arguments
+    "ERA",     # eradicate (dead commented code)
+    "PLE",     # pylint errors
+    "PLR0206", # pylint property with parameters
+    "PLR0402", # use 'from x import y' in imports
+    "PLW",     # pylint warnings
+    "D",       # pydocstyle (docstrings)
+    "T20",     # flake8-print (disallow leftover print statements in production code)
+    "RUF",     # ruff-specific rules
+    "BLE",     # flake8-blind-except
+    "S",       # flake8-bandit (security analysis)
+    "ASYNC",   # flake8-async
+    "C4",      # flake8-comprehensions
+    "PERF",    # perflint
+    "LOG",     # flake8-logging
+    "G",       # flake8-logging-format
+    "PIE",     # flake8-pie
+    "C901",    # mccabe cyclomatic complexity
+    "PLR0912", # pylint too many branches
+    "PLR0915", # pylint too many statements
+    "TRY",     # tryceratops
+    "PTH",     # flake8-use-pathlib
+    "TID",     # flake8-tidy-imports
+    "DTZ",     # flake8-datetimez
+    "TC",      # flake8-type-checking
+    "RSE",     # flake8-raise
+    "ISC",     # flake8-implicit-str-concat
+    "ICN",     # flake8-import-conventions
+    "PT",      # flake8-pytest-style
+    "Q",       # flake8-quotes
+    "PLR0911", # pylint too many return statements
+]
+ignore = [
+    "E501",    # line length handled by formatter
+    "D100",    # ignore missing docstring in public module
+    "D104",    # ignore missing docstring in public package (__init__.py)
+    "D105",    # ignore missing docstring in magic methods
+    "D107",    # ignore missing docstring in __init__
+    "D205",    # 1 blank line between summary and description
+    "D400",    # first line should end with a period
+    "D401",    # first line should be in imperative mood
+    "D415",    # first line punctuation
+    "ARG002",  # unused method arguments in interface implementations
+    "RUF001",  # ambiguous unicode in string (Cyrillic)
+    "RUF002",  # ambiguous unicode in docstring (Cyrillic)
+    "RUF003",  # ambiguous unicode in comment (Cyrillic)
+    "TRY002",  # create your own exception
+    "TRY003",  # avoid specifying long messages outside the exception class
+    "TRY300",  # consider moving return statement to else block
+    "TRY301",  # abstract raise to an inner function
+    "TRY400",  # use logging.exception instead of logging.error
+    "PTH123",  # open() instead of Path.open()
+    "ISC001",  # conflicts with ruff format
+]
+
+[tool.ruff.lint.per-file-ignores]
+"*.ipynb" = ["E402", "F401", "D", "T201", "S101", "PERF", "RUF", "BLE", "C4", "LOG", "G", "S311", "C901", "PLR0912", "PLR0915", "PLR0911", "DTZ", "TC", "PT"]
+"tests/**" = ["D", "ARG001", "ARG002", "PLW0603", "S101", "S102", "S108", "S310", "S311", "S608", "BLE001", "PERF", "RUF043", "C901", "PLR0912", "PLR0915", "PLR0911"]
+"scripts/**" = ["T201", "D", "BLE001", "S310", "C901", "PLR0912", "PLR0915", "PLR0911"]
+".vulture_whitelist.py" = ["ALL"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 12
+
+[tool.ruff.lint.pylint]
+max-branches = 12
+max-statements = 50
+max-returns = 6
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "."]
+
+[tool.mypy]
+python_version = "3.13"
+mypy_path = "src"
+check_untyped_defs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_return_any = true
+warn_unreachable = true
+disallow_any_generics = true
+strict_equality = true
+disallow_subclassing_any = false
+disallow_untyped_decorators = true
+ignore_missing_imports = false
+disable_error_code = ["import-untyped"]
+exclude = [
+    "^notebooks/.*",
+    "^data/.*",
+    "^\\.venv/.*",
+]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+warn_return_any = false
+
+[[tool.mypy.overrides]]
+module = [
+    "google.genai.*",
+    "httpx2.*",
+    "PIL.*",
+    "pillow_heif.*",
+]
+ignore_missing_imports = true
+
+[tool.poe.tasks]
+lint           = "ruff check ."
+lint-fix       = "ruff check . --fix"
+format         = "ruff format ."
+format-check   = "ruff format . --check"
+typecheck      = "mypy src tests"
+test           = "pytest"
+test-unit      = "pytest tests/unit"
+test-cov       = "pytest --cov=src --cov-report=term-missing --cov-fail-under=70"
+dead-code      = "vulture src tests scripts .vulture_whitelist.py --ignore-names 'get_*,post_*,update_*,delete_*,index,*_memes'"
+check-lengths  = "python3 scripts/check_file_lengths.py src"
+oop-check      = "python3 scripts/check_oop_style.py src"
+audit          = { shell = "uv export --frozen --no-dev --no-hashes --no-emit-project --format requirements.txt | pip-audit -r /dev/stdin" }
+security-audit = "bandit -r src -c pyproject.toml"
+pre-commit     = "pre-commit run --all-files"
+
+[tool.bandit]
+exclude_dirs = ["tests", "data", "notebooks", ".venv"]
+skips = ["B311", "B404", "B603", "B607"]
