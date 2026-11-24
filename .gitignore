@@ -28,3 +28,6 @@ data/bronze/
 mlartifacts/
 *.onnx
 *.onnx.data
+
+# Agents
+.agents/
