@@ -23,3 +23,11 @@ data/bronze/
 .vscode/
 .idea/
 .DS_Store
+/models/
+.cache/
+mlartifacts/
+*.onnx
+*.onnx.data
+
+# Agents
+.agents/
