@@ -10,6 +10,8 @@ if TYPE_CHECKING:
 
     import numpy as np
 
+    from meme_organizer.retrieval.tracking import ExperimentTracker
+
 
 class BaseRetrieverAdapter(ABC):
     """Единый контракт для любой поисковой модели (BM25, Bi-Encoder, Cross-Encoder, etc)."""
@@ -22,9 +24,15 @@ class BaseRetrieverAdapter(ABC):
     def load_or_build(self) -> None:
         """Инициализирует или загружает веса/индексы модели."""
 
-    def fit(self, train_pairs: list[dict[str, str]]) -> None:
+    def fit(
+        self,
+        train_pairs: list[dict[str, str]],
+        corpus_docs: list[dict[str, Any]],
+        val_pairs: list[dict[str, str]] | None = None,
+        tracker: ExperimentTracker | None = None,
+    ) -> None:
         """Опциональное обучение/дообучение (по умолчанию no-op для zero-shot)."""
-        _ = train_pairs
+        _ = (train_pairs, corpus_docs, val_pairs, tracker)
 
     @abstractmethod
     def encode_corpus(self, corpus_docs: list[dict[str, Any]]) -> Any:
@@ -40,6 +48,7 @@ class BaseRetrieverAdapter(ABC):
 
     def export_onnx(self, output_path: Path) -> Path | None:
         """Опциональный экспорт модели в ONNX формат."""
+        _ = output_path
         return None
 
     def get_model_size_mb(self) -> float:

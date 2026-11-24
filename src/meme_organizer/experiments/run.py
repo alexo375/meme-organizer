@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from meme_organizer.retrieval.adapters.dense_text import DenseTextRetrieverAdapter
+from meme_organizer.retrieval.adapters.finetuned_dense import FineTunedDenseAdapter
 from meme_organizer.retrieval.baselines.bm25 import BM25RetrieverAdapter
 from meme_organizer.retrieval.pipeline import RetrievalPipeline
 
@@ -21,8 +22,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--model",
         type=str,
         default="bm25",
-        choices=["bm25", "rubert-tiny2", "e5-small"],
+        choices=["bm25", "rubert-tiny2", "e5-small", "rubert-tiny2-finetuned"],
         help="Модель для запуска",
+    )
+    parser.add_argument(
+        "--train",
+        action="store_true",
+        help="Запустить режим дообучения (fit) перед оценкой",
     )
     parser.add_argument(
         "--gold-dataset",
@@ -74,6 +80,15 @@ def main() -> None:
             query_prefix="query: ",
             passage_prefix="passage: ",
         )
+    elif args.model == "rubert-tiny2-finetuned":
+        adapter = FineTunedDenseAdapter(
+            model_name="rubert-tiny2-finetuned",
+            base_model_id="cointegrated/rubert-tiny2",
+            epochs=4,
+            lr=2e-4,
+            batch_size=32,
+            max_length=64,
+        )
     else:
         raise ValueError(f"Неизвестная модель: {args.model}")
 
@@ -83,6 +98,7 @@ def main() -> None:
         gold_dataset_path=args.gold_dataset,
         split_path=args.split,
         split_name=args.split_name,
+        train_mode=args.train,
         run_name=args.run_name,
     )
 

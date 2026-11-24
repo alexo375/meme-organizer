@@ -53,9 +53,17 @@ def test_retrieval_pipeline_mock_run(tmp_path: Path) -> None:
             f,
         )
 
+    from collections.abc import Generator
+    from contextlib import contextmanager
+
     class MockTracker:
-        def log_run(self, **kwargs: Any) -> str:
-            return "mock-run-id-123"
+        @contextmanager
+        def start_run(self, run_name: str, tags: dict[str, str] | None = None) -> Generator[str]:
+            _ = (run_name, tags)
+            yield "mock-run-id-123"
+
+        def log_run_results(self, **kwargs: Any) -> None:
+            _ = kwargs
 
     pipeline = RetrievalPipeline(tracker=MockTracker())  # type: ignore[arg-type]
     metrics, run_id = pipeline.run(

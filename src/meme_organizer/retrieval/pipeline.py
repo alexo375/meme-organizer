@@ -1,9 +1,10 @@
-"""Шаблонный пайплайн Retrieval (Template Method)."""
+"""Шаблонный пайплайн Retrieval (Template Method) с замером времени и профилированием."""
 
 from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 from meme_organizer.evaluation.metrics import RankingMetrics, RetrievalEvaluator
@@ -19,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class RetrievalPipeline:
-    """Оркестратор эксперимента: запускает сквозной цикл, считает метрики и логирует в MLflow."""
+    """Оркестратор эксперимента: запускает сквозной цикл, считает метрики, замеряет время и логирует в MLflow."""
 
     def __init__(self, tracker: ExperimentTracker | None = None) -> None:
         self.tracker = tracker or ExperimentTracker()
@@ -34,7 +35,8 @@ class RetrievalPipeline:
         run_name: str | None = None,
         tags: dict[str, str] | None = None,
     ) -> tuple[RankingMetrics, str]:
-        """Жесткий шаблонный цикл эксперимента без возможности забыть шаг или метрику."""
+        """Жесткий шаблонный цикл эксперимента с замером общего времени, времени обучения и времени инференса."""
+        t_total_start = time.perf_counter()
         logger.info("Старт эксперимента для модели: %s (сплит: %s)", adapter.model_name, split_name)
 
         # 1. Загрузка данных
@@ -54,47 +56,6 @@ class RetrievalPipeline:
         queries = [p["query"] for p in pairs]
         ground_truth_indices = [corpus_hash_to_idx[p["file_hash"]] for p in pairs]
 
-        # 2. Инициализация и опциональное дообучение
-        adapter.load_or_build()
-        if train_mode:
-            train_pairs = split_info.get("train_pairs", [])
-            logger.info("Дообучение адаптера на %d парах...", len(train_pairs))
-            adapter.fit(train_pairs)
-
-        # 3. Кодирование корпуса и запросов
-        logger.info("Кодирование корпуса (%d документов)...", len(corpus_docs))
-        corpus_repr = adapter.encode_corpus(corpus_docs)
-
-        logger.info("Кодирование запросов (%d запросов)...", len(queries))
-        query_repr = adapter.encode_queries(queries)
-
-        # 4. Расчет скоров
-        logger.info("Расчет матрицы предсказаний...")
-        scores_matrix = adapter.predict_scores(query_repr, corpus_repr)
-
-        # 5. Оценка качества
-        metrics, worst_queries = RetrievalEvaluator.compute_metrics(
-            scores_matrix=scores_matrix,
-            ground_truth_indices=ground_truth_indices,
-            queries=queries,
-            corpus_hashes=corpus_hashes,
-            top_k=5,
-        )
-
-        logger.info(
-            "Метрики [%s]: Recall@1=%.4f | Recall@5=%.4f | MRR@5=%.4f | NDCG@5=%.4f",
-            split_name,
-            metrics.recall_at_1,
-            metrics.recall_at_5,
-            metrics.mrr_at_5,
-            metrics.ndcg_at_5,
-        )
-
-        # 6. Профилирование задержки и размера
-        sample_q = queries[0] if queries else "тестовый запрос"
-        profile = ModelProfiler.benchmark(adapter, sample_query=sample_q)
-        logger.info("Профиль: CPU latency=%.2f ms | Size=%.2f MB", profile.cpu_latency_ms, profile.model_size_mb)
-
         # 7. Автоматическое логирование в MLflow
         effective_run_name = run_name or f"{adapter.model_name}_{split_name}"
         params: dict[str, Any] = {
@@ -103,6 +64,7 @@ class RetrievalPipeline:
             "split_version": split_info.get("version", "v1"),
             "corpus_size": len(corpus_docs),
             "num_queries": len(queries),
+            "train_mode": train_mode,
             **adapter.params,
         }
 
@@ -110,13 +72,80 @@ class RetrievalPipeline:
         if tags:
             all_tags.update(tags)
 
-        run_id = self.tracker.log_run(
-            run_name=effective_run_name,
-            params=params,
-            metrics=metrics,
-            profile=profile,
-            worst_queries=worst_queries,
-            tags=all_tags,
-        )
+        with self.tracker.start_run(run_name=effective_run_name, tags=all_tags) as run_id:
+            # 2. Инициализация и опциональное дообучение внутри активного рана MLflow
+            adapter.load_or_build()
+
+            training_time_sec = 0.0
+            if train_mode:
+                train_pairs = split_info.get("train_pairs", [])
+                val_pairs = split_info.get("val_pairs", [])
+                logger.info(
+                    "Дообучение адаптера на %d парах (валидация на %d парах)...", len(train_pairs), len(val_pairs)
+                )
+                t_train_start = time.perf_counter()
+                adapter.fit(
+                    train_pairs=train_pairs,
+                    corpus_docs=corpus_docs,
+                    val_pairs=val_pairs,
+                    tracker=self.tracker,
+                )
+                training_time_sec = round(time.perf_counter() - t_train_start, 3)
+                logger.info("Обучение завершено за %.2f сек", training_time_sec)
+
+            # 3. Чистый инференс при оценке контрольных метрик
+            t_eval_start = time.perf_counter()
+
+            logger.info("Кодирование корпуса (%d документов)...", len(corpus_docs))
+            corpus_repr = adapter.encode_corpus(corpus_docs)
+
+            logger.info("Кодирование запросов (%d запросов)...", len(queries))
+            query_repr = adapter.encode_queries(queries)
+
+            logger.info("Расчет матрицы предсказаний...")
+            scores_matrix = adapter.predict_scores(query_repr, corpus_repr)
+
+            eval_inference_time_sec = round(time.perf_counter() - t_eval_start, 3)
+            throughput_qps = round(len(queries) / max(eval_inference_time_sec, 1e-6), 2)
+
+            # 4. Оценка качества
+            metrics, worst_queries = RetrievalEvaluator.compute_metrics(
+                scores_matrix=scores_matrix,
+                ground_truth_indices=ground_truth_indices,
+                queries=queries,
+                corpus_hashes=corpus_hashes,
+                top_k=5,
+            )
+
+            logger.info(
+                "Метрики [%s]: Recall@1=%.4f | Recall@5=%.4f | MRR@5=%.4f | NDCG@5=%.4f",
+                split_name,
+                metrics.recall_at_1,
+                metrics.recall_at_5,
+                metrics.mrr_at_5,
+                metrics.ndcg_at_5,
+            )
+
+            # 5. Профилирование задержки на один запрос (batch=1) и размера
+            sample_q = queries[0] if queries else "тестовый запрос"
+            profile = ModelProfiler.benchmark(adapter, sample_query=sample_q)
+
+            # 6. Полное время выполнения рана
+            total_run_time_sec = round(time.perf_counter() - t_total_start, 3)
+
+            timing_metrics = {
+                "total_run_time_sec": total_run_time_sec,
+                "training_time_sec": training_time_sec,
+                "eval_inference_time_sec": eval_inference_time_sec,
+                "eval_throughput_qps": throughput_qps,
+            }
+
+            self.tracker.log_run_results(
+                params=params,
+                metrics=metrics,
+                profile=profile,
+                worst_queries=worst_queries,
+                timing_metrics=timing_metrics,
+            )
 
         return metrics, run_id
