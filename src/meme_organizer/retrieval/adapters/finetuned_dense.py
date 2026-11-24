@@ -47,6 +47,8 @@ class FineTunedDenseAdapter(DenseTextRetrieverAdapter):
         max_length: int = 64,
         lora_r: int = 8,
         lora_alpha: int = 16,
+        query_prefix: str = "",
+        passage_prefix: str = "",
         **kwargs: Any,
     ) -> None:
         super().__init__(
@@ -54,6 +56,8 @@ class FineTunedDenseAdapter(DenseTextRetrieverAdapter):
             hf_model_id=base_model_id,
             max_length=max_length,
             batch_size=batch_size,
+            query_prefix=query_prefix,
+            passage_prefix=passage_prefix,
             **kwargs,
         )
         self.epochs = epochs
@@ -72,13 +76,15 @@ class FineTunedDenseAdapter(DenseTextRetrieverAdapter):
             rich_desc = doc.get("rich_description") or ""
             transcript = doc.get("transcript_or_text") or ""
             tags = " ".join(doc.get("tags") or [])
-            corpus_text_map[doc["file_hash"]] = f"{u_caption} {tags} {transcript} {rich_desc}".strip()
+            full_text = f"{u_caption} {tags} {transcript} {rich_desc}".strip()
+            corpus_text_map[doc["file_hash"]] = f"{self.passage_prefix}{full_text}"
 
         tuples: list[tuple[str, str]] = []
         for p in train_pairs:
             doc_text = corpus_text_map.get(p["file_hash"], "")
-            if doc_text and p["query"].strip():
-                tuples.append((p["query"].strip(), doc_text))
+            q_clean = p["query"].strip()
+            if doc_text and q_clean:
+                tuples.append((f"{self.query_prefix}{q_clean}", doc_text))
         return tuples
 
     def _train_epoch(
@@ -150,7 +156,7 @@ class FineTunedDenseAdapter(DenseTextRetrieverAdapter):
     ) -> None:
         """Дообучает модель с Multiple Negatives Ranking Loss (In-Batch Negatives) и логирует эпохи."""
         train_tuples = self._prepare_train_tuples(train_pairs, corpus_docs)
-        logger.info("Подготовлено %d пар для обучения...", len(train_tuples))
+        logger.info("Подготовлено %d пар для обучения модели %s...", len(train_tuples), self.model_name)
 
         lora_cfg = LoraConfig(
             r=self.lora_r,
@@ -179,7 +185,12 @@ class FineTunedDenseAdapter(DenseTextRetrieverAdapter):
                 v_metrics = self._validate_epoch(corpus_docs, val_queries, val_gt, corpus_hashes)
                 metrics.update(v_metrics)
                 logger.info(
-                    "Эпоха %d/%d: loss=%.4f | val_MRR@5=%.4f", epoch, self.epochs, avg_loss, v_metrics["val_mrr_at_5"]
+                    "Эпоха %d/%d [%s]: loss=%.4f | val_MRR@5=%.4f",
+                    epoch,
+                    self.epochs,
+                    self.model_name,
+                    avg_loss,
+                    v_metrics["val_mrr_at_5"],
                 )
 
             if tracker:
@@ -196,5 +207,6 @@ class FineTunedDenseAdapter(DenseTextRetrieverAdapter):
                 base_name=self.model_name.replace("/", "_"),
                 max_length=self.max_length,
             )
+            logger.info("Дообученная ONNX модель сохранена: %s", self._onnx_path)
         except Exception:
             logger.exception("Ошибка экспорта дообученной модели в ONNX")

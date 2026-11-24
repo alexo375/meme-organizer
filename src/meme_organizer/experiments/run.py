@@ -22,7 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--model",
         type=str,
         default="bm25",
-        choices=["bm25", "rubert-tiny2", "e5-small", "rubert-tiny2-finetuned"],
+        choices=["bm25", "rubert-tiny2", "e5-small", "rubert-tiny2-finetuned", "e5-small-finetuned"],
         help="Модель для запуска",
     )
     parser.add_argument(
@@ -88,6 +88,17 @@ def main() -> None:
             lr=2e-4,
             batch_size=32,
             max_length=64,
+        )
+    elif args.model == "e5-small-finetuned":
+        adapter = FineTunedDenseAdapter(
+            model_name="multilingual-e5-small-finetuned",
+            base_model_id="intfloat/multilingual-e5-small",
+            epochs=4,
+            lr=1e-4,
+            batch_size=16,
+            max_length=64,
+            query_prefix="query: ",
+            passage_prefix="passage: ",
         )
     else:
         raise ValueError(f"Неизвестная модель: {args.model}")

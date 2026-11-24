@@ -35,7 +35,9 @@ meme-label = "meme_organizer.labeling.cli:main"
 [dependency-groups]
 dev = [
     "bandit>=1.8.0",
+    "ipykernel>=7.4.0",
     "mypy>=1.15.0",
+    "nbformat>=5.11.1",
     "pip-audit>=2.8.0",
     "poethepoet>=0.32.0",
     "pre-commit>=4.0.0",
