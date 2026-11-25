@@ -129,5 +129,7 @@ class RetrievalPipeline:
 
             for onnx_file in retriever.get_onnx_paths():
                 self.tracker.log_model_artifact(onnx_file, artifact_path_in_run="onnx")
+            for art_name, art_dir in retriever.get_artifact_dirs().items():
+                self.tracker.log_artifact_dir(art_dir, artifact_path_in_run=art_name)
 
         return metrics, run_id

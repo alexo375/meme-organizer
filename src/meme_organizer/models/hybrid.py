@@ -31,6 +31,7 @@ class HybridRetriever(BaseRetriever):
         dense_model_name: str = "multilingual-e5-small-finetuned",
         alpha: float = 0.5,
         rerank_top_k: int = 20,
+        reuse_dense_from_mlflow: bool = True,
         **kwargs: Any,
     ) -> None:
         name = model_name or f"hybrid-{mode}"
@@ -39,7 +40,9 @@ class HybridRetriever(BaseRetriever):
         self.dense_model_name = dense_model_name
         self.alpha = alpha
         self.rerank_top_k = rerank_top_k
+        self.reuse_dense_from_mlflow = reuse_dense_from_mlflow
 
+        mlflow_run = f"{dense_model_name}_test" if reuse_dense_from_mlflow else None
         self.bm25_retriever = BM25Retriever(model_name=f"{name}_bm25")
 
         if "e5" in dense_model_name:
@@ -48,11 +51,13 @@ class HybridRetriever(BaseRetriever):
                 base_model_id="intfloat/multilingual-e5-small",
                 query_prefix="query: ",
                 passage_prefix="passage: ",
+                mlflow_run_name=mlflow_run,
             )
         else:
             self.dense_retriever = FineTunedDenseRetriever(
                 model_name=dense_model_name,
                 base_model_id="cointegrated/rubert-tiny2",
+                mlflow_run_name=mlflow_run,
             )
 
         self.reranker: CrossEncoderReranker | None = None
@@ -80,7 +85,10 @@ class HybridRetriever(BaseRetriever):
         logger.info("Fit гибридного ретривера (режим: %s)...", self.mode)
         self.corpus_docs = corpus_docs
         self.bm25_retriever.fit(train_pairs, corpus_docs, val_pairs, tracker)
-        self.dense_retriever.fit(train_pairs, corpus_docs, val_pairs, tracker)
+        if self.dense_retriever._loaded_from_mlflow:
+            logger.info("Используется готовая FP32 модель из MLflow, повторное дообучение пропущено.")
+        else:
+            self.dense_retriever.fit(train_pairs, corpus_docs, val_pairs, tracker)
 
         if self.mode == "optuna" and val_pairs:
             logger.info("Подбор оптимального alpha через Optuna на %d валидационных парах...", len(val_pairs))
@@ -101,6 +109,10 @@ class HybridRetriever(BaseRetriever):
             optimizer = FusionOptimizer(n_trials=50)
             self.alpha = optimizer.fit(dense_scores, bm25_scores, target_indices)
             logger.info("Подобран оптимальный alpha: %.4f (Val MRR@5: %.4f)", self.alpha, optimizer.best_mrr or 0.0)
+            import mlflow
+
+            if mlflow.active_run():
+                mlflow.log_param("calibrated_alpha", round(self.alpha, 4))
 
     def encode_corpus(self, corpus_docs: list[dict[str, Any]]) -> dict[str, Any]:
         """Encode corpus using both retrievers."""
@@ -127,12 +139,10 @@ class HybridRetriever(BaseRetriever):
 
             for q_idx in range(n_queries):
                 dense_ranked = [
-                    (str(d_idx), float(dense_scores[q_idx, d_idx]))
-                    for d_idx in np.argsort(-dense_scores[q_idx])
+                    (str(d_idx), float(dense_scores[q_idx, d_idx])) for d_idx in np.argsort(-dense_scores[q_idx])
                 ]
                 bm25_ranked = [
-                    (str(d_idx), float(bm25_scores[q_idx, d_idx]))
-                    for d_idx in np.argsort(-bm25_scores[q_idx])
+                    (str(d_idx), float(bm25_scores[q_idx, d_idx])) for d_idx in np.argsort(-bm25_scores[q_idx])
                 ]
                 rrf_res = reciprocal_rank_fusion([dense_ranked, bm25_ranked], k=60)
                 for d_str, score in rrf_res:

@@ -16,17 +16,19 @@ class ModelBundleProfile:
     max_length: int
     query_prefix: str
     passage_prefix: str
-    alpha_bm25: float
-    beta_dense: float
-    epochs: int = 3
+    dense_weight: float
+    bm25_weight: float
+    epochs: int = 50
+    patience: int = 10
     lr: float = 2e-4
     batch_size: int = 32
     lora_r: int = 8
     lora_alpha: int = 16
+    seed: int = 42
     extra_metadata: dict[str, str] = field(default_factory=dict)
 
 
-# SOTA Champion: Fine-tuned multilingual-e5-small with Optuna convex weights
+# SOTA Champion: Fine-tuned multilingual-e5-small (weights will be refined/verified during build)
 TEXT_CHAMPION = ModelBundleProfile(
     profile_id="text-champion",
     model_name="multilingual-e5-small-finetuned",
@@ -35,14 +37,15 @@ TEXT_CHAMPION = ModelBundleProfile(
     max_length=64,
     query_prefix="query: ",
     passage_prefix="passage: ",
-    alpha_bm25=0.52,
-    beta_dense=0.48,
-    epochs=3,
+    dense_weight=0.52,
+    bm25_weight=0.48,
+    epochs=50,
+    patience=10,
     lr=2e-4,
     batch_size=32,
     lora_r=8,
     lora_alpha=16,
-    extra_metadata={"metrics_mrr_at_5": "0.6785", "metrics_recall_at_1": "0.6275"},
+    seed=42,
 )
 
 # Lightweight RuBERT-tiny2 option (~15 MB, ultra-fast)
@@ -54,14 +57,15 @@ RUBERT_TINY2_FT = ModelBundleProfile(
     max_length=64,
     query_prefix="",
     passage_prefix="",
-    alpha_bm25=0.50,
-    beta_dense=0.50,
-    epochs=4,
+    dense_weight=0.50,
+    bm25_weight=0.50,
+    epochs=50,
+    patience=10,
     lr=2e-4,
     batch_size=32,
     lora_r=8,
     lora_alpha=16,
-    extra_metadata={"metrics_mrr_at_5": "0.4447"},
+    seed=42,
 )
 
 PROFILES: dict[str, ModelBundleProfile] = {

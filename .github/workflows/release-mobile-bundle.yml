@@ -72,18 +72,14 @@ jobs:
           tag_name: ${{ steps.vars.outputs.TAG }}
           name: "Mobile Delivery Bundle: ${{ steps.vars.outputs.TAG }}"
           body: |
-            ## 📱 Meme Organizer Mobile Model Bundle
-            
-            - **Profile**: `${{ steps.vars.outputs.PROFILE }}`
-            - **Component**: `text_encoder` (ONNX INT8 + In-graph Pooling & L2 Normalization)
-            - **Target Runtime**: Android ONNX Runtime Mobile
-            
-            ### Included in Archive:
-            - `text_encoder_int8.onnx` — INT8 quantized model (~112 MB)
-            - `tokenizer/` — SentencePiece / HuggingFace tokenizer assets
-            - `preset_manifest.json` — Schema and configuration metadata
-            - `smoke_test_pack.json` — Golden parity test pack for Android JUnit testing
-            - `README.md` — Kotlin integration guide
+            Meme Organizer Mobile Text Engine (${{ steps.vars.outputs.PROFILE }}).
+
+            Содержимое архива:
+            - `text_encoder_int8.onnx` — модель ONNX Dynamic INT8 (in-graph Mean Pooling и L2-нормализация)
+            - `tokenizer/` — файлы токенизатора XLM-RoBERTa
+            - `preset_manifest.json` — параметры модели, формула скоринга, SHA-256 и метрики
+            - `smoke_test_pack.json` — эталонные тесты паритета (токены, векторы, гибридные скоры)
+            - `README.md` — инструкция и примеры на Kotlin
           files: |
             dist/mobile_bundle/*.tar.gz
             dist/mobile_bundle/SHA256SUMS.txt

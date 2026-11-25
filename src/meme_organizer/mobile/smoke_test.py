@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING, ClassVar
 import numpy as np
 from pydantic import BaseModel, Field
 
+from meme_organizer.models.bm25 import BM25Retriever
+from meme_organizer.models.fusion import combine_scores, min_max_normalize
+
 if TYPE_CHECKING:
     import onnxruntime
     from transformers import PreTrainedTokenizerBase
@@ -22,12 +25,13 @@ class SmokeSample(BaseModel):
     text_type: str  # "query" or "passage"
     raw_text: str
     formatted_text: str
+    bm25_tokens: list[str]
     input_ids: list[int]
     attention_mask: list[int]
     embedding_dim: int
     l2_norm: float
     embedding_head: list[float] = Field(description="First 10 dimensions of normalized embedding")
-    full_embedding: list[float] = Field(description="Full 384-dim embedding for exact match check")
+    full_embedding: list[float] = Field(description="Full embedding for exact match check")
 
 
 class SmokePairTest(BaseModel):
@@ -40,20 +44,37 @@ class SmokePairTest(BaseModel):
     expected_cosine_similarity: float
 
 
+class SmokeHybridRankingTest(BaseModel):
+    """End-to-end hybrid ranking test over the 4 sample passages."""
+
+    query_id: str
+    query_text: str
+    dense_weight: float
+    bm25_weight: float
+    passage_ids: list[str]
+    dense_raw_scores: list[float]
+    dense_norm_scores: list[float]
+    bm25_raw_scores: list[float]
+    bm25_norm_scores: list[float]
+    hybrid_scores: list[float]
+    expected_ranking: list[str]
+
+
 class SmokeTestPack(BaseModel):
     """Comprehensive parity verification package for mobile testing."""
 
     description: str = Field(
-        default="Golden parity test suite for mobile ONNX Runtime verification against Python reference"
+        default="Golden parity test suite for mobile ONNX Runtime & Hybrid Ranking verification against Python"
     )
     model_name: str
     embedding_dimension: int
     samples: list[SmokeSample]
     similarity_tests: list[SmokePairTest]
+    hybrid_ranking_tests: list[SmokeHybridRankingTest]
 
 
 class SmokeTestGenerator:
-    """Generates golden parity test samples using an ONNX session and tokenizer."""
+    """Generates golden parity test samples using an ONNX session, BM25, and tokenizer."""
 
     SAMPLE_QUERIES: ClassVar[list[str]] = [
         "кот в капюшоне",
@@ -79,8 +100,10 @@ class SmokeTestGenerator:
         query_prefix: str = "query: ",
         passage_prefix: str = "passage: ",
         max_length: int = 64,
+        dense_weight: float = 0.52,
+        bm25_weight: float = 0.48,
     ) -> SmokeTestPack:
-        """Run inferences and record exact golden input/output pairs."""
+        """Run inferences and record exact golden input/output pairs and hybrid ranking."""
         samples: list[SmokeSample] = []
         sample_embs: dict[str, np.ndarray] = {}
 
@@ -102,8 +125,10 @@ class SmokeTestGenerator:
             sample_embs[sid] = emb
 
         # 2. Process passages
+        passage_ids: list[str] = []
         for idx, p in enumerate(cls.SAMPLE_PASSAGES):
             sid = f"passage_{idx + 1}"
+            passage_ids.append(sid)
             fmt = f"{passage_prefix}{p}"
             s, emb = cls._run_single(
                 session=onnx_session,
@@ -118,19 +143,17 @@ class SmokeTestGenerator:
             samples.append(s)
             sample_embs[sid] = emb
 
-        # 3. Calculate pairwise cosine similarity for test pairs
+        # 3. Pairwise cosine similarity tests
         similarity_tests: list[SmokePairTest] = []
         pairs_to_test = [
-            ("query_1", "passage_1"),  # кот в капюшоне -> Мем с грустным котом... (HIGH)
-            ("query_2", "passage_2"),  # прод в пятницу -> упавший сервер в пятницу... (HIGH)
-            ("query_3", "passage_3"),  # паника и хаос -> собака this is fine (MEDIUM/HIGH)
-            ("query_1", "passage_2"),  # кот -> сервер в пятницу (LOW / IRRELEVANT)
+            ("query_1", "passage_1"),
+            ("query_2", "passage_2"),
+            ("query_3", "passage_3"),
+            ("query_1", "passage_2"),
         ]
 
         for q_id, p_id in pairs_to_test:
-            q_emb = sample_embs[q_id]
-            p_emb = sample_embs[p_id]
-            sim = float(np.dot(q_emb, p_emb))
+            sim = float(np.dot(sample_embs[q_id], sample_embs[p_id]))
             similarity_tests.append(
                 SmokePairTest(
                     query_id=q_id,
@@ -141,11 +164,47 @@ class SmokeTestGenerator:
                 )
             )
 
+        # 4. End-to-end Hybrid Ranking parity tests over the 4 sample passages
+        bm25 = BM25Retriever()
+        mini_corpus = [{"user_caption": p} for p in cls.SAMPLE_PASSAGES]
+        corpus_repr = bm25.encode_corpus(mini_corpus)
+        q_repr = bm25.encode_queries(cls.SAMPLE_QUERIES)
+        bm25_raw = bm25.predict_scores(q_repr, corpus_repr)
+
+        q_mat = np.stack([sample_embs[f"query_{i + 1}"] for i in range(len(cls.SAMPLE_QUERIES))])
+        p_mat = np.stack([sample_embs[f"passage_{i + 1}"] for i in range(len(cls.SAMPLE_PASSAGES))])
+        dense_raw = np.matmul(q_mat, p_mat.T)
+
+        dense_norm = min_max_normalize(dense_raw)
+        bm25_norm = min_max_normalize(bm25_raw)
+        hybrid_mat = combine_scores(dense_raw, bm25_raw, alpha=dense_weight, normalize=True)
+
+        hybrid_tests: list[SmokeHybridRankingTest] = []
+        for idx, q_text in enumerate(cls.SAMPLE_QUERIES):
+            order = np.argsort(-hybrid_mat[idx])
+            expected_ranking = [passage_ids[int(j)] for j in order]
+            hybrid_tests.append(
+                SmokeHybridRankingTest(
+                    query_id=f"query_{idx + 1}",
+                    query_text=q_text,
+                    dense_weight=dense_weight,
+                    bm25_weight=bm25_weight,
+                    passage_ids=passage_ids,
+                    dense_raw_scores=[round(float(x), 5) for x in dense_raw[idx]],
+                    dense_norm_scores=[round(float(x), 5) for x in dense_norm[idx]],
+                    bm25_raw_scores=[round(float(x), 5) for x in bm25_raw[idx]],
+                    bm25_norm_scores=[round(float(x), 5) for x in bm25_norm[idx]],
+                    hybrid_scores=[round(float(x), 5) for x in hybrid_mat[idx]],
+                    expected_ranking=expected_ranking,
+                )
+            )
+
         return SmokeTestPack(
             model_name=model_name,
             embedding_dimension=embedding_dim,
             samples=samples,
             similarity_tests=similarity_tests,
+            hybrid_ranking_tests=hybrid_tests,
         )
 
     @staticmethod
@@ -179,6 +238,7 @@ class SmokeTestGenerator:
             text_type=text_type,
             raw_text=raw_text,
             formatted_text=formatted_text,
+            bm25_tokens=BM25Retriever.tokenize(raw_text),
             input_ids=inputs["input_ids"][0].tolist(),
             attention_mask=inputs["attention_mask"][0].tolist(),
             embedding_dim=dim,

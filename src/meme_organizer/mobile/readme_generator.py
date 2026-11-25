@@ -9,61 +9,76 @@ if TYPE_CHECKING:
 
 
 class ReadmeGenerator:
-    """Generates complete and unambiguous README.md for Android / Kotlin developer."""
+    """Generates technical README.md for Android / Kotlin integration."""
 
     @classmethod
     def generate(cls, manifest: PresetManifest) -> str:
-        """Render complete integration guide with Kotlin snippets."""
-        return f"""# Meme Organizer Mobile Text Engine — Integration Guide
+        """Render integration guide with Kotlin code snippets."""
+        q_prefix = manifest.prefixes.get("query", "query: ")
+        p_prefix = manifest.prefixes.get("passage", "passage: ")
+        w_dense = manifest.hybrid_scoring.dense_weight
+        w_bm25 = manifest.hybrid_scoring.bm25_weight
+        sp = manifest.tokenizer.special_token_ids
 
-Пакет предназначен для локального (on-device) семантического и гибридного поиска мемов в Android-приложении.
+        prov_section = ""
+        if manifest.provenance:
+            m = manifest.provenance.evaluated_onnx_test_metrics
+            prov_section = f"""
+## 6. Метаданные сборки и метрики
+- Git Commit: `{manifest.provenance.git_commit}`
+- ONNX SHA-256: `{manifest.provenance.onnx_sha256}`
+- Паритет PyTorch FP32 / ONNX INT8: `mean_cosine = {manifest.provenance.pytorch_onnx_mean_cosine_similarity}`, `max_abs_diff = {manifest.provenance.pytorch_onnx_max_abs_diff}`
+- Метрики ONNX INT8 на тестовом сплите (`{manifest.provenance.splits_path}`):
+  - Dense Only: `MRR@5 = {m.get("onnx_dense_mrr_at_5", "n/a")}`, `Recall@1 = {m.get("onnx_dense_recall_at_1", "n/a")}`, `Recall@5 = {m.get("onnx_dense_recall_at_5", "n/a")}`
+  - Hybrid (BM25 + Dense): `MRR@5 = {m.get("onnx_hybrid_mrr_at_5", "n/a")}`, `Recall@1 = {m.get("onnx_hybrid_recall_at_1", "n/a")}`, `Recall@5 = {m.get("onnx_hybrid_recall_at_5", "n/a")}`
+"""
 
-## 1. Содержимое пакета
-- **`text_encoder_int8.onnx`** — квантованная INT8 модель ({manifest.model_name}).
-  - **ВНИМАНИЕ:** Внутрь ONNX-графа **уже вшиты Mean Pooling и L2-нормализация**!
-  - **Вход:** `input_ids` [1, {manifest.max_sequence_length}], `attention_mask` [1, {manifest.max_sequence_length}]
-  - **Выход:** `sentence_embedding` [1, {manifest.embedding_dimension}] с нормой $\\|v\\|_2 = 1.0$.
-  - Android-клиенту **НЕ НУЖНО** производить матричные умножения, пулинги или нормализацию векторов — модель возвращает готовый единичный вектор эмбеддинга.
-- **`tokenizer/`** — файлы токенизатора:
-  - `sentencepiece.bpe.model` (для C++ / JNI SentencePiece)
-  - `tokenizer.json`, `special_tokens_map.json` (для HuggingFace / OnnxRuntime-extensions)
-- **`preset_manifest.json`** — декларативный контракт метаданных (размерность, формулы, префиксы).
-- **`smoke_test_pack.json`** — эталонный набор для проверки паритета (входные токены, ожидаемые векторы и косинусные скоры для JUnit тестов).
+        return f"""# Meme Organizer Text Engine (Mobile ONNX)
+
+Пакет для локального текстового поиска в Android-приложении.
+
+## 1. Состав пакета
+- `text_encoder_int8.onnx` — модель `{manifest.model_name}` в формате ONNX (Dynamic INT8).
+  - Mean Pooling и L2-нормализация встроены в ONNX-граф.
+  - Входы: `input_ids` `[batch, {manifest.max_sequence_length}]` (`int64`), `attention_mask` `[batch, {manifest.max_sequence_length}]` (`int64`).
+  - Выход: `sentence_embedding` `[batch, {manifest.embedding_dimension}]` (`float32`), L2-норма = `1.0`.
+- `tokenizer/` — файлы токенизатора (`tokenizer.json`, `sentencepiece.bpe.model`, `tokenizer_config.json`, `special_tokens_map.json`).
+- `preset_manifest.json` — параметры модели, токенизации, формулы скоринга и метрики сборки (`schema_version: {manifest.schema_version}`).
+- `smoke_test_pack.json` — эталонные входы и выходы для тестов паритета.
 
 ---
 
-## 2. Подключение в Android (`build.gradle.kts`)
+## 2. Токенизация
+Модель использует токенизатор XLM-RoBERTa:
+- Рекомендуется загружать `tokenizer/tokenizer.json` (через HuggingFace Tokenizers JNI или `onnxruntime-extensions`). При использовании `sentencepiece.bpe.model` напрямую необходимо учитывать сдвиг ID словаря XLM-R/Fairseq, иначе ID токенов не совпадут.
+- Префикс для поискового запроса: `"{q_prefix}"`
+- Префикс для описания мема: `"{p_prefix}"`
+- Параметры: `padding = "max_length"`, `truncation = true`, `max_length = {manifest.max_sequence_length}`.
+- Спецтокены: `<s> = {sp.get("bos", 0)}`, `<pad> = {sp.get("pad", 1)}`, `</s> = {sp.get("eos", 2)}`, `<unk> = {sp.get("unk", 3)}`.
 
+Эталонные массивы `input_ids` и `attention_mask` для проверки токенизатора лежат в `smoke_test_pack.json`.
+
+---
+
+## 3. Формула гибридного скоринга
+Перед сложением оба канала (Dense cosine similarity и BM25) нормализуются через Min-Max по всем кандидатам для каждого запроса в диапазон `[0.0, 1.0]`:
+
+`score = {w_dense} * min_max_norm(cosine) + {w_bm25} * min_max_norm(bm25)`
+
+где `min_max_norm(x_i) = (x_i - min(x)) / max(max(x) - min(x), 1e-9)`.
+
+---
+
+## 4. Пример интеграции на Kotlin
+
+### 4.1. Зависимости (`build.gradle.kts`)
 ```kotlin
 dependencies {{
-    // ONNX Runtime Mobile
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.17.1")
-
-    // (Опционально) Если используется встроенная токенизация ONNX:
-    // implementation("com.microsoft.onnxruntime:onnxruntime-extensions-android:0.10.0")
 }}
 ```
 
-Поместите `text_encoder_int8.onnx` в `app/src/main/assets/models/` или скачивайте динамически в `context.filesDir`.
-
----
-
-## 3. Архитектура поиска на девайсе (Гибрид BM25 + Dense)
-
-Модель оптимизирована для двухэтапного или комбинированного скоринга:
-
-$$\\text{{Score}} = {manifest.hybrid_scoring.alpha_bm25} \\times \\text{{Score}}_{{\\text{{BM25}}}} + {manifest.hybrid_scoring.beta_dense} \\times \\text{{CosineSimilarity}}$$
-
-1. **BM25 (Лексический поиск):** Реализуется через встроенный в Android **SQLite FTS5** (по таблице описаний и транскриптов мемов).
-2. **Dense (Семантический поиск):**
-   - Текст запроса дополняется префиксом `{manifest.prefixes.get("query", "query: ")}`.
-   - Текст описания мема дополняется префиксом `{manifest.prefixes.get("passage", "passage: ")}`.
-   - Вычисляется скалярное произведение (для L2-нормализованных векторов `dotProduct(q, doc)` строго равно `cosineSimilarity`).
-
----
-
-## 4. Пример реализации на Kotlin
-
+### 4.2. Инференс и гибридный скоринг
 ```kotlin
 package com.memeorganizer.ml
 
@@ -71,82 +86,123 @@ import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import java.nio.LongBuffer
+import kotlin.math.max
 
 class TextEmbeddingEngine(private val session: OrtSession, private val env: OrtEnvironment) {{
 
     companion object {{
         const val MAX_SEQ_LEN = {manifest.max_sequence_length}
         const val EMBEDDING_DIM = {manifest.embedding_dimension}
-        const val QUERY_PREFIX = "{manifest.prefixes.get("query", "query: ")}"
-        const val PASSAGE_PREFIX = "{manifest.prefixes.get("passage", "passage: ")}"
+        const val QUERY_PREFIX = "{q_prefix}"
+        const val PASSAGE_PREFIX = "{p_prefix}"
+        const val WEIGHT_DENSE = {w_dense}f
+        const val WEIGHT_BM25 = {w_bm25}f
     }}
 
-    /**
-     * Получение L2-нормализованного вектора эмбеддинга (размер 384).
-     * @param inputIds массив токенов, выровненный до MAX_SEQ_LEN
-     * @param attentionMask маска внимания (1 для реальных токенов, 0 для паддингов)
-     */
     fun encode(inputIds: LongArray, attentionMask: LongArray): FloatArray {{
         require(inputIds.size == MAX_SEQ_LEN) {{ "inputIds must have size $MAX_SEQ_LEN" }}
         require(attentionMask.size == MAX_SEQ_LEN) {{ "attentionMask must have size $MAX_SEQ_LEN" }}
 
         val shape = longArrayOf(1, MAX_SEQ_LEN.toLong())
-        val tensorInputIds = OnnxTensor.createTensor(env, LongBuffer.wrap(inputIds), shape)
-        val tensorAttentionMask = OnnxTensor.createTensor(env, LongBuffer.wrap(attentionMask), shape)
+        val tIds = OnnxTensor.createTensor(env, LongBuffer.wrap(inputIds), shape)
+        val tMask = OnnxTensor.createTensor(env, LongBuffer.wrap(attentionMask), shape)
 
-        val inputs = mapOf(
-            "input_ids" to tensorInputIds,
-            "attention_mask" to tensorAttentionMask
-        )
-
+        val inputs = mapOf("input_ids" to tIds, "attention_mask" to tMask)
         session.run(inputs).use {{ result ->
-            val embeddingTensor = result[0].value as Array<FloatArray>
-            // Модель уже выполнила Mean-Pooling и L2-нормализацию!
-            return embeddingTensor[0]
+            val tensor = result[0].value as Array<FloatArray>
+            return tensor[0]
         }}
     }}
 
-    /**
-     * Косинусное сходство между двумя нормализованными векторами (скалярное произведение).
-     */
     fun cosineSimilarity(v1: FloatArray, v2: FloatArray): Float {{
         var dot = 0f
-        for (i in 0 until EMBEDDING_DIM) {{
-            dot += v1[i] * v2[i]
-        }}
+        for (i in 0 until EMBEDDING_DIM) dot += v1[i] * v2[i]
         return dot
     }}
 
-    /**
-     * Итоговый гибридный скор мема.
-     */
-    fun computeHybridScore(bm25NormalizedScore: Float, cosineSimilarity: Float): Float {{
-        return {manifest.hybrid_scoring.alpha_bm25}f * bm25NormalizedScore + {manifest.hybrid_scoring.beta_dense}f * cosineSimilarity
+    fun minMaxNormalize(scores: FloatArray): FloatArray {{
+        if (scores.isEmpty()) return scores
+        val minVal = scores.min()
+        val maxVal = scores.max()
+        val diff = max(maxVal - minVal, 1e-9f)
+        return FloatArray(scores.size) {{ i -> (scores[i] - minVal) / diff }}
+    }}
+
+    fun combineHybridScores(denseScores: FloatArray, bm25Scores: FloatArray): FloatArray {{
+        val dNorm = minMaxNormalize(denseScores)
+        val bNorm = minMaxNormalize(bm25Scores)
+        return FloatArray(denseScores.size) {{ i ->
+            WEIGHT_DENSE * dNorm[i] + WEIGHT_BM25 * bNorm[i]
+        }}
+    }}
+}}
+```
+
+### 4.3. Реализация BM25Okapi на Kotlin
+Совпадает с Python `rank_bm25.BM25Okapi` и не зависит от системного SQLite FTS5:
+```kotlin
+package com.memeorganizer.ml
+
+import kotlin.math.ln
+
+class SimpleBm25Engine(
+    documents: List<String>,
+    private val k1: Double = 1.5,
+    private val b: Double = 0.75,
+    private val epsilon: Double = 0.25
+) {{
+    private val tokenRegex = Regex("[^\\\\p{{L}}\\\\p{{N}}_]+")
+    private val docTokens: List<List<String>> = documents.map {{ tokenize(it) }}
+    private val docLengths: IntArray = docTokens.map {{ it.size }}.toIntArray()
+    private val avgdl: Double = docLengths.average().takeIf {{ !it.isNaN() && it > 0 }} ?: 1.0
+    private val idf: Map<String, Double>
+
+    init {{
+        val n = documents.size
+        val df = mutableMapOf<String, Int>()
+        for (tokens in docTokens) {{
+            for (term in tokens.toSet()) df[term] = (df[term] ?: 0) + 1
+        }}
+        val rawIdf = mutableMapOf<String, Double>()
+        val negTerms = mutableListOf<String>()
+        var idfSum = 0.0
+        for ((term, freq) in df) {{
+            val score = ln((n - freq + 0.5) / (freq + 0.5))
+            rawIdf[term] = score
+            idfSum += score
+            if (score < 0) negTerms.add(term)
+        }}
+        val avgIdf = if (df.isNotEmpty()) idfSum / df.size else 0.0
+        val epsIdf = epsilon * avgIdf
+        for (term in negTerms) rawIdf[term] = epsIdf
+        idf = rawIdf
+    }}
+
+    fun tokenize(text: String): List<String> =
+        text.lowercase().split(tokenRegex).filter {{ it.length > 1 }}
+
+    fun scoreAll(query: String): FloatArray {{
+        val qTokens = tokenize(query)
+        return FloatArray(docTokens.size) {{ docIdx ->
+            val tokens = docTokens[docIdx]
+            val dl = docLengths[docIdx]
+            var score = 0.0
+            for (q in qTokens) {{
+                val termIdf = idf[q] ?: continue
+                val tf = tokens.count {{ it == q }}.toDouble()
+                score += termIdf * (tf * (k1 + 1.0)) / (tf + k1 * (1.0 - b + b * dl / avgdl))
+            }}
+            score.toFloat()
+        }}
     }}
 }}
 ```
 
 ---
 
-## 5. Проверка паритета (Smoke Test Verification)
-
-В файле `smoke_test_pack.json` находятся эталонные сэмплы из Python-пайплайна.
-
-Для проверки паритета на Android напишите простой JUnit-тест:
-1. Загрузите сэмпл `query_1` из `smoke_test_pack.json`.
-2. Подайте `input_ids` и `attention_mask` в `TextEmbeddingEngine.encode()`.
-3. Сравните первые 10 значений (`embedding_head`) и норму вектора:
-   ```kotlin
-   val embedding = engine.encode(sample.inputIds, sample.attentionMask)
-
-   // Проверка L2-нормы (должна быть 1.0)
-   var norm = 0f
-   for (v in embedding) norm += v * v
-   assertEquals(1.0f, Math.sqrt(norm.toDouble()).toFloat(), 1e-4f)
-
-   // Сравнение значений с эталоном
-   for (i in 0 until 10) {{
-       assertEquals(sample.embeddingHead[i], embedding[i], 1e-3f)
-   }}
-   ```
+## 5. Проверка паритета (`smoke_test_pack.json`)
+- `samples`: `input_ids`, `attention_mask`, `bm25_tokens`, `embedding_head`, `full_embedding`.
+- `similarity_tests`: ожидаемые значения косинусного сходства.
+- `hybrid_ranking_tests`: эталонный расчёт `dense_raw_scores`, `dense_norm_scores`, `bm25_raw_scores`, `bm25_norm_scores`, `hybrid_scores` и `expected_ranking` по 4 документам.
+{prov_section}
 """

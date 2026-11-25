@@ -11,17 +11,60 @@ class HybridScoringConfig(BaseModel):
     """Configuration for client-side hybrid ranking."""
 
     formula: str = Field(
-        default="0.52 * bm25_score_normalized + 0.48 * cosine_similarity",
-        description="Scoring formula evaluated on device",
+        default="dense_weight * minmax(cosine_similarity) + bm25_weight * minmax(bm25_score)",
+        description="Exact scoring formula matching Python fusion.py",
     )
-    alpha_bm25: float = Field(default=0.52, description="Weight for lexical BM25 matching")
-    beta_dense: float = Field(default=0.48, description="Weight for semantic dense embeddings")
+    dense_weight: float = Field(default=0.52, description="Weight for min-max normalized dense cosine similarity")
+    bm25_weight: float = Field(default=0.48, description="Weight for min-max normalized lexical BM25 score")
+    normalization: str = Field(
+        default="per_query_min_max",
+        description="Both channels must be min-max normalized into [0, 1] across candidate docs per query",
+    )
+    bm25_params: dict[str, Any] = Field(
+        default_factory=lambda: {
+            "algorithm": "BM25Okapi",
+            "k1": 1.5,
+            "b": 0.75,
+            "epsilon": 0.25,
+            "tokenizer_regex": r"[^\w]+",
+            "min_token_length": 2,
+            "lowercase": True,
+            "indexed_fields": ["user_caption", "rich_description", "transcript_or_text", "tags"],
+        },
+        description="BM25 parameters matching Python BM25Retriever",
+    )
+
+
+class TokenizerSpec(BaseModel):
+    """Exact tokenization rules and special token IDs for mobile parity."""
+
+    recommended_asset: str = Field(default="tokenizer/tokenizer.json")
+    fallback_sentencepiece: str = Field(default="tokenizer/sentencepiece.bpe.model")
+    padding: str = Field(default="max_length")
+    truncation: bool = Field(default=True)
+    max_length: int = Field(default=64)
+    special_token_ids: dict[str, int] = Field(
+        default_factory=lambda: {"bos": 0, "pad": 1, "eos": 2, "unk": 3},
+        description="Special token IDs used by the model tokenizer",
+    )
+
+
+class BundleProvenance(BaseModel):
+    """Cryptographic and experimental provenance of this exact build."""
+
+    git_commit: str
+    dataset_path: str
+    splits_path: str
+    onnx_sha256: str
+    pytorch_onnx_mean_cosine_similarity: float
+    pytorch_onnx_max_abs_diff: float
+    evaluated_onnx_test_metrics: dict[str, float]
 
 
 class PresetManifest(BaseModel):
     """Declarative specification of the mobile model package contract."""
 
-    schema_version: str = Field(default="1.0.0", description="Contract schema version")
+    schema_version: str = Field(default="1.1.0", description="Contract schema version")
     component: str = Field(default="text_encoder", description="Component name")
     model_name: str = Field(..., description="Canonical model identifier")
     model_file: str = Field(default="text_encoder_int8.onnx", description="ONNX binary filename")
@@ -48,9 +91,7 @@ class PresetManifest(BaseModel):
             "passage": "passage: ",
         }
     )
-    tokenizer_type: str = Field(
-        default="SentencePiece / XLM-RoBERTa (tokenizer.json, sentencepiece.bpe.model)",
-        description="Tokenizer specification",
-    )
+    tokenizer: TokenizerSpec = Field(default_factory=TokenizerSpec)
     hybrid_scoring: HybridScoringConfig = Field(default_factory=HybridScoringConfig)
+    provenance: BundleProvenance | None = Field(default=None, description="Measured metrics and build checksums")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary additional metadata")

@@ -114,3 +114,9 @@ class ExperimentTracker:
             data_file = artifact_path.parent / f"{artifact_path.name}.data"
             if data_file.exists():
                 mlflow.log_artifact(str(data_file), artifact_path=artifact_path_in_run)
+
+    def log_artifact_dir(self, local_dir: Path, artifact_path_in_run: str = "hf_model") -> None:
+        """Upload a directory of model artifacts (e.g., FP32 HuggingFace weights) to MLflow."""
+        if local_dir.exists() and local_dir.is_dir():
+            logger.info("Загрузка директории %s в MLflow артефакты (%s)...", local_dir.name, artifact_path_in_run)
+            mlflow.log_artifacts(str(local_dir), artifact_path=artifact_path_in_run)

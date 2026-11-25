@@ -9,12 +9,16 @@ from typing import TYPE_CHECKING
 import numpy as np
 import onnxruntime
 import pytest
+import torch
 from transformers import AutoModel, AutoTokenizer
 
 from meme_organizer.mobile.bundle_builder import MobileBundleBuilder
 from meme_organizer.mobile.manifest import PresetManifest
 from meme_organizer.mobile.profiles import ModelBundleProfile
+from meme_organizer.mobile.quantizer import OnnxQuantizer
 from meme_organizer.mobile.smoke_test import SmokeTestPack
+from meme_organizer.models.finetuned_dense import FineTunedDenseRetriever
+from meme_organizer.models.fusion import FusionOptimizer
 from meme_organizer.models.onnx_exporter import OnnxExporter
 
 if TYPE_CHECKING:
@@ -32,19 +36,19 @@ def dummy_profile() -> ModelBundleProfile:
         max_length=32,
         query_prefix="",
         passage_prefix="",
-        alpha_bm25=0.5,
-        beta_dense=0.5,
+        dense_weight=0.55,
+        bm25_weight=0.45,
         epochs=1,
     )
 
 
 def test_onnx_exporter_in_graph_pooling(tmp_path: Path) -> None:
-    """Verify that exported ONNX model outputs normalized [batch, dim] embeddings directly."""
+    """Verify FP32 ONNX export and separate INT8 quantization output normalized [batch, dim] embeddings."""
     model_id = "cointegrated/rubert-tiny2"
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     model = AutoModel.from_pretrained(model_id)
 
-    onnx_path = OnnxExporter.export_text_encoder(
+    fp32_path = OnnxExporter.export_to_fp32_onnx(
         model=model,
         tokenizer=tokenizer,
         output_dir=tmp_path / "onnx",
@@ -52,8 +56,15 @@ def test_onnx_exporter_in_graph_pooling(tmp_path: Path) -> None:
         max_length=32,
         include_pooling=True,
     )
+    assert fp32_path.exists()
 
+    onnx_path = OnnxQuantizer.quantize_dynamic_int8(
+        fp32_onnx_path=fp32_path,
+        int8_onnx_path=tmp_path / "onnx" / "test_text_encoder_int8.onnx",
+        cleanup_fp32=True,
+    )
     assert onnx_path.exists()
+    assert not fp32_path.exists()
 
     session = onnxruntime.InferenceSession(str(onnx_path), providers=["CPUExecutionProvider"])
     inputs = tokenizer("тестовый запрос", padding="max_length", max_length=32, return_tensors="np")
@@ -73,18 +84,72 @@ def test_onnx_exporter_in_graph_pooling(tmp_path: Path) -> None:
     assert pytest.approx(norm, abs=1e-4) == 1.0
 
 
+def test_lora_updates_across_multiple_epochs(tmp_path: Path) -> None:
+    """Verify optimizer keeps updating LoRA weights after epoch 1 validation."""
+    retriever = FineTunedDenseRetriever(
+        model_name="rubert-tiny2-test-ft",
+        base_model_id="cointegrated/rubert-tiny2",
+        epochs=2,
+        lr=1e-2,
+        batch_size=2,
+        max_length=16,
+        cache_dir=tmp_path / "hf",
+    )
+    corpus = [
+        {"file_hash": "h1", "user_caption": "кот в шапке", "tags": ["кот"]},
+        {"file_hash": "h2", "user_caption": "упал прод", "tags": ["прод"]},
+    ]
+    pairs = [
+        {"query": "кот", "file_hash": "h1"},
+        {"query": "прод", "file_hash": "h2"},
+    ]
+
+    losses: list[float] = []
+
+    class SpyTracker:
+        def log_epoch_metrics(self, epoch: int, metrics: dict[str, float]) -> None:
+            _ = epoch
+            losses.append(metrics["train_loss"])
+
+    retriever.fit(train_pairs=pairs, corpus_docs=corpus, val_pairs=pairs, tracker=SpyTracker())  # type: ignore[arg-type]
+
+    assert len(losses) == 2
+    assert losses[1] < losses[0]
+    assert retriever._model is not None
+    assert not hasattr(retriever._model, "peft_config")
+    # Verify clean FP32 HF directory is saved (and no INT8 ONNX in training artifact)
+    art_dirs = retriever.get_artifact_dirs()
+    assert "hf_model" in art_dirs
+    assert (art_dirs["hf_model"] / "config.json").exists()
+    assert retriever.get_onnx_paths() == []
+    with torch.no_grad():
+        emb = retriever.encode_queries(["кот"])
+        assert emb.shape == (1, 312)
+
+
+def test_fusion_optimizer_balanced_range() -> None:
+    """Verify FusionOptimizer stays within balanced [0.25, 0.75] range using K-Fold CV."""
+    rng = np.random.default_rng(42)
+    s_dense = rng.random((20, 10))
+    s_bm25 = rng.random((20, 10))
+    targets = [int(i % 10) for i in range(20)]
+
+    opt = FusionOptimizer(n_trials=15, alpha_range=(0.25, 0.75), n_folds=5)
+    alpha = opt.fit(s_dense, s_bm25, targets)
+    assert 0.25 <= alpha <= 0.75
+
+
 def test_mobile_bundle_builder(tmp_path: Path, dummy_profile: ModelBundleProfile) -> None:
-    """Verify end-to-end bundle creation: archive contents, manifest and smoke pack."""
+    """Verify end-to-end bundle creation: archive contents, manifest, provenance, and smoke pack."""
     work_dir = tmp_path / "work"
     output_tar = tmp_path / "dist" / f"bundle-{dummy_profile.profile_id}.tar.gz"
 
-    builder = MobileBundleBuilder(profile=dummy_profile, work_dir=work_dir)
+    builder = MobileBundleBuilder(profile=dummy_profile, work_dir=work_dir, run_full_eval=False)
     res_tar = builder.build(output_tar=output_tar)
 
     assert res_tar.exists()
     assert res_tar.stat().st_size > 0
 
-    # Inspect tar archive contents
     with tarfile.open(res_tar, "r:gz") as tar:
         names = tar.getnames()
         root = f"meme-organizer-{dummy_profile.profile_id}"
@@ -95,25 +160,35 @@ def test_mobile_bundle_builder(tmp_path: Path, dummy_profile: ModelBundleProfile
         assert f"{root}/README.md" in names
         assert any(n.startswith(f"{root}/tokenizer/") for n in names)
 
-        # Validate manifest content
+        # Validate manifest content and provenance
         manifest_file = tar.extractfile(f"{root}/preset_manifest.json")
         assert manifest_file is not None
         manifest_data = json.load(manifest_file)
         manifest = PresetManifest.model_validate(manifest_data)
         assert manifest.component == "text_encoder"
         assert manifest.embedding_dimension == 312
+        assert manifest.hybrid_scoring.dense_weight == 0.55
+        assert manifest.hybrid_scoring.bm25_weight == 0.45
+        assert manifest.hybrid_scoring.normalization == "per_query_min_max"
+        assert manifest.provenance is not None
+        assert len(manifest.provenance.onnx_sha256) == 64
+        assert manifest.provenance.pytorch_onnx_mean_cosine_similarity >= 0.95
 
-        # Validate smoke test pack content
+        # Validate smoke test pack content including hybrid ranking tests
         smoke_file = tar.extractfile(f"{root}/smoke_test_pack.json")
         assert smoke_file is not None
         smoke_data = json.load(smoke_file)
         smoke_pack = SmokeTestPack.model_validate(smoke_data)
         assert len(smoke_pack.samples) == 8
         assert len(smoke_pack.similarity_tests) == 4
+        assert len(smoke_pack.hybrid_ranking_tests) == 4
 
-        # Validate README mentions Kotlin and formula
+        # Validate README contains MinMax, SimpleBm25Engine, and exact weights
         readme_file = tar.extractfile(f"{root}/README.md")
         assert readme_file is not None
         readme_text = readme_file.read().decode("utf-8")
         assert "class TextEmbeddingEngine" in readme_text
-        assert "0.5f * bm25NormalizedScore + 0.5f * cosineSimilarity" in readme_text
+        assert "class SimpleBm25Engine" in readme_text
+        assert "minMaxNormalize" in readme_text
+        assert "WEIGHT_DENSE = 0.55f" in readme_text
+        assert "WEIGHT_BM25 = 0.45f" in readme_text

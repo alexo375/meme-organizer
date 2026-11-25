@@ -55,6 +55,10 @@ class BaseRetriever(ABC):
         """Return generated ONNX model paths to log into MLflow."""
         return []
 
+    def get_artifact_dirs(self) -> dict[str, Path]:
+        """Return directories (e.g. {'hf_model': Path(...)}) to upload to MLflow."""
+        return {}
+
     def get_model_size_mb(self) -> float:
         """Return model disk footprint in MB."""
         return 0.0

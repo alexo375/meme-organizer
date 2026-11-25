@@ -1,4 +1,4 @@
-"""Module for exporting PyTorch Transformer models to ONNX INT8 with in-graph pooling."""
+"""Module for exporting PyTorch Transformer models to clean FP32 ONNX with optional in-graph pooling."""
 
 from __future__ import annotations
 
@@ -55,30 +55,29 @@ class NormalizedEmbeddingPipeline(torch.nn.Module):
 
 
 class OnnxExporter:
-    """Exports HuggingFace Transformer model to ONNX with dynamic INT8 quantization."""
+    """Exports HuggingFace Transformer model to clean FP32 ONNX."""
 
     @staticmethod
-    def export_text_encoder(
+    def export_to_fp32_onnx(
         model: PreTrainedModel,
         tokenizer: PreTrainedTokenizerBase,
         output_dir: Path,
         base_name: str,
         max_length: int = 64,
         include_pooling: bool = True,
+        overwrite: bool = False,
     ) -> Path:
-        """Export transformer into ONNX INT8."""
+        """Export transformer into FP32 ONNX without quantization."""
         import onnxruntime
-        from onnxruntime.quantization import QuantType, quantize_dynamic
 
         output_dir.mkdir(parents=True, exist_ok=True)
-        raw_onnx_path = output_dir / f"{base_name}_fp32.onnx"
-        quant_onnx_path = output_dir / f"{base_name}_int8.onnx"
+        fp32_onnx_path = output_dir / f"{base_name}_fp32.onnx"
 
-        if quant_onnx_path.exists():
-            logger.info("Квантованная ONNX модель уже существует: %s", quant_onnx_path)
-            return quant_onnx_path
+        if fp32_onnx_path.exists() and not overwrite:
+            logger.info("FP32 ONNX модель уже существует: %s", fp32_onnx_path)
+            return fp32_onnx_path
 
-        logger.info("Экспорт модели %s в формат ONNX (include_pooling=%s)...", base_name, include_pooling)
+        logger.info("Экспорт модели %s в формат FP32 ONNX (include_pooling=%s)...", base_name, include_pooling)
         model.eval()
 
         export_model: torch.nn.Module = NormalizedEmbeddingPipeline(model) if include_pooling else model
@@ -119,7 +118,7 @@ class OnnxExporter:
         torch.onnx.export(
             export_model,
             inputs_to_pass,
-            f=str(raw_onnx_path),
+            f=str(fp32_onnx_path),
             input_names=input_names,
             output_names=output_names,
             dynamic_axes=dynamic_axes,
@@ -127,25 +126,11 @@ class OnnxExporter:
             do_constant_folding=True,
         )
 
-        logger.info("Применение dynamic INT8 квантования...")
-        quantize_dynamic(
-            model_input=raw_onnx_path,
-            model_output=quant_onnx_path,
-            weight_type=QuantType.QInt8,
-        )
+        _ = onnxruntime.InferenceSession(str(fp32_onnx_path), providers=["CPUExecutionProvider"])
+        size_mb = fp32_onnx_path.stat().st_size / (1024 * 1024)
+        logger.info("FP32 ONNX модель готова: %s (размер: %.2f МБ)", fp32_onnx_path, size_mb)
 
-        # Удаляем промежуточный тяжелый fp32 onnx файл и данные
-        if raw_onnx_path.exists():
-            raw_onnx_path.unlink()
-        fp32_data = output_dir / f"{base_name}_fp32.onnx.data"
-        if fp32_data.exists():
-            fp32_data.unlink()
-
-        _ = onnxruntime.InferenceSession(str(quant_onnx_path), providers=["CPUExecutionProvider"])
-        size_mb = quant_onnx_path.stat().st_size / (1024 * 1024)
-        logger.info("ONNX INT8 модель готова: %s (размер: %.2f МБ)", quant_onnx_path, size_mb)
-
-        return quant_onnx_path
+        return fp32_onnx_path
 
     @staticmethod
     def export_tokenizer_assets(tokenizer: PreTrainedTokenizerBase, output_dir: Path) -> list[Path]:
