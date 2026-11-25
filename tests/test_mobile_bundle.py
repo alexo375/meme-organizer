@@ -16,7 +16,9 @@ from meme_organizer.mobile.bundle_builder import MobileBundleBuilder
 from meme_organizer.mobile.manifest import PresetManifest
 from meme_organizer.mobile.profiles import ModelBundleProfile
 from meme_organizer.mobile.quantizer import OnnxQuantizer
+from meme_organizer.mobile.release_publisher import GitHubReleasePublisher
 from meme_organizer.mobile.smoke_test import SmokeTestPack
+from meme_organizer.models.dense import DenseTextRetriever
 from meme_organizer.models.finetuned_dense import FineTunedDenseRetriever
 from meme_organizer.models.fusion import FusionOptimizer
 from meme_organizer.models.onnx_exporter import OnnxExporter
@@ -137,6 +139,37 @@ def test_fusion_optimizer_balanced_range() -> None:
     opt = FusionOptimizer(n_trials=15, alpha_range=(0.25, 0.75), n_folds=5)
     alpha = opt.fit(s_dense, s_bm25, targets)
     assert 0.25 <= alpha <= 0.75
+
+
+def test_dense_mlflow_fast_fail_when_unreachable() -> None:
+    """Verify MLflow port check fails fast (<1s) without urllib3 retry hangs."""
+    import time
+
+    t0 = time.perf_counter()
+    reachable = DenseTextRetriever._is_mlflow_reachable("http://127.0.0.1:59999")
+    elapsed = time.perf_counter() - t0
+    assert reachable is False
+    assert elapsed < 1.0
+
+
+def test_release_publisher_utils(tmp_path: Path) -> None:
+    """Verify GitHub remote parsing and SHA256SUMS generation."""
+    assert GitHubReleasePublisher.parse_github_repo("git@github.com:alexo375/meme-organizer.git") == (
+        "alexo375",
+        "meme-organizer",
+    )
+    assert GitHubReleasePublisher.parse_github_repo("https://github.com/alexo375/meme-organizer") == (
+        "alexo375",
+        "meme-organizer",
+    )
+
+    dummy_tar = tmp_path / "bundle.tar.gz"
+    dummy_tar.write_bytes(b"hello-world")
+    sums_path = GitHubReleasePublisher.write_sha256sums(dummy_tar)
+    assert sums_path.exists()
+    content = sums_path.read_text(encoding="utf-8")
+    assert "bundle.tar.gz" in content
+    assert len(content.split()[0]) == 64
 
 
 def test_mobile_bundle_builder(tmp_path: Path, dummy_profile: ModelBundleProfile) -> None:

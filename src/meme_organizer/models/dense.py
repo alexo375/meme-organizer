@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import socket
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import numpy as np
 import torch
@@ -55,12 +57,29 @@ class DenseTextRetriever(BaseRetriever):
         self._tokenizer = AutoTokenizer.from_pretrained(self.hf_model_id)
         self._model = AutoModel.from_pretrained(self.hf_model_id)
 
+    @staticmethod
+    def _is_mlflow_reachable(tracking_uri: str) -> bool:
+        """Fast TCP check to avoid 2-minute urllib3 retry hangs when MLflow is offline."""
+        parsed = urlparse(tracking_uri)
+        if parsed.scheme not in {"http", "https"}:
+            return True
+        host = parsed.hostname or "localhost"
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        try:
+            with socket.create_connection((host, port), timeout=0.5):
+                return True
+        except OSError:
+            return False
+
     def _try_load_from_mlflow(self) -> bool:
         """Try loading fine-tuned FP32 HuggingFace model directory from a finished MLflow run."""
         import mlflow
 
         try:
             cfg = AppConfig()
+            if not self._is_mlflow_reachable(cfg.mlflow_tracking_uri):
+                logger.info("MLflow сервер (%s) недоступен, пропускаем загрузку.", cfg.mlflow_tracking_uri)
+                return False
             client = mlflow.tracking.MlflowClient(cfg.mlflow_tracking_uri)
             exp = client.get_experiment_by_name(cfg.experiment_name)
             if not exp:
