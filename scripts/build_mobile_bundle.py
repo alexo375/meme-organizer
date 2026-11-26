@@ -1,4 +1,4 @@
-"""CLI script for building and exporting mobile delivery bundle."""
+"""CLI-скрипт для сборки и экспорта мобильного пакета поставки."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import logging
 import sys
 from pathlib import Path
 
-from meme_organizer.mobile.bundle_builder import MobileBundleBuilder, get_profile
+from meme_organizer.export.bundle.mobile_bundle_builder import MobileBundleBuilder
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,7 +39,7 @@ def main() -> None:
     args = parser.parse_args()
 
     try:
-        profile = get_profile(args.profile)
+        profile = MobileBundleBuilder.get_profile(args.profile)
     except KeyError as e:
         logger.error(str(e))
         sys.exit(1)

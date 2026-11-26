@@ -1,4 +1,4 @@
-from meme_organizer.models.dense import DenseTextRetriever
+from meme_organizer.retrieval.text.dense_text_retriever import DenseTextRetriever
 
 
 def test_dense_text_retriever_init() -> None:

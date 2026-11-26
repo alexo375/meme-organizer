@@ -1,8 +1,8 @@
 import json
 from pathlib import Path
 
-from meme_organizer.models.bm25 import BM25Retriever
-from meme_organizer.pipeline.retrieval_pipeline import RetrievalPipeline
+from meme_organizer.evaluation.pipeline.retrieval_pipeline import RetrievalPipeline
+from meme_organizer.retrieval.text.bm25_retriever import BM25Retriever
 
 
 def test_retrieval_pipeline_execution(tmp_path: Path) -> None:

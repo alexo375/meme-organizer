@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from meme_organizer.dataset.splitter import LeakFreeSplitter
+from meme_organizer.data.leak_free_splitter import LeakFreeSplitter
 
 
 def test_leak_free_splitter(tmp_path: Path) -> None:

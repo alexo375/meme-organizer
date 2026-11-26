@@ -1,60 +1,34 @@
-# Meme Organizer — ML Search & Retrieval Pipeline
+# Meme Organizer ML Pipeline
 
-Репозиторий машинного обучения для мобильного приложения **Meme Organizer** (поиск мемов и реакций на устройстве Android).
+Пайплайн обучения, оценки и экспорта моделей поиска мемов и видеореакций для Android-приложения Meme Organizer.
 
-Целевой рантайм: Android (ONNX Runtime Mobile, INT8 квантование, RAM < 150 MB, латентность < 50 мс на CPU).
+## Быстрый старт
 
-Подробный архитектурный план и правила разработки описаны в [.agents/ROADMAP.md](.agents/ROADMAP.md) и [.agents/GEMINI.md](.agents/GEMINI.md).
+Требуется Python 3.13, `uv` и Docker.
 
----
-
-## 🚀 Быстрый старт инфраструктуры (Docker + MLflow)
-
-Для трекинга экспериментов используется **MLflow** с бэкендом **PostgreSQL** в Docker:
+Поднять PostgreSQL и сервер MLflow (веб-интерфейс на `http://localhost:5000`):
 
 ```bash
-# Запуск PostgreSQL и MLflow Tracking Server
 docker compose up -d
-
-# Проверка статуса сервисов
-docker compose ps
-```
-Веб-интерфейс MLflow доступен по адресу: **http://localhost:5000**.
-
-Остановить сервисы:
-```bash
-docker compose down
 ```
 
----
-
-## 🛠 Локальное окружение (uv)
-
-Требуется Python 3.13 и `uv`:
+Установить зависимости:
 
 ```bash
 uv sync
 ```
 
-### Генерация честного сплита данных (Leak-free)
+Собрать мобильный бандл или опубликовать релиз можно через скрипты в `scripts/`:
+
 ```bash
-uv run python -m meme_organizer.data_splits.splitter
+uv run python scripts/build_mobile_bundle.py --help
+uv run python scripts/publish_release.py --help
 ```
-Создает фиксированный сплит `data/splits/splits_v1.json` без утечек связанных мемов (`scene_group`).
 
-### Запуск экспериментов
-```bash
-# Запуск baseline модели (BM25)
-uv run python -m meme_organizer.experiments.run --model bm25
-```
-Все метрики ($MRR@5$, $Recall@1$, $Recall@5$, $NDCG@5$), профили задержки и Top-15 Worst Queries автоматически логируются в MLflow.
+## Проверки
 
----
-
-## 🧪 Тестирование и качество кода
+Запуск линтера, проверки типов и тестов:
 
 ```bash
-uv run poe test       # Запуск pytest
-uv run poe lint       # Проверка ruff
-uv run poe typecheck  # Проверка mypy
+just check-fast
 ```

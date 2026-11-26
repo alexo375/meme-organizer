@@ -12,16 +12,16 @@ import pytest
 import torch
 from transformers import AutoModel, AutoTokenizer
 
-from meme_organizer.mobile.bundle_builder import MobileBundleBuilder
-from meme_organizer.mobile.manifest import PresetManifest
-from meme_organizer.mobile.profiles import ModelBundleProfile
-from meme_organizer.mobile.quantizer import OnnxQuantizer
-from meme_organizer.mobile.release_publisher import GitHubReleasePublisher
-from meme_organizer.mobile.smoke_test import SmokeTestPack
-from meme_organizer.models.dense import DenseTextRetriever
-from meme_organizer.models.finetuned_dense import FineTunedDenseRetriever
-from meme_organizer.models.fusion import FusionOptimizer
-from meme_organizer.models.onnx_exporter import OnnxExporter
+from meme_organizer.domain.preset_manifest import PresetManifest
+from meme_organizer.export.bundle.bundle_profiles import ModelBundleProfile
+from meme_organizer.export.bundle.mobile_bundle_builder import MobileBundleBuilder
+from meme_organizer.export.bundle.release_publisher import GitHubReleasePublisher
+from meme_organizer.export.generators.smoke_test_generator import SmokeTestPack
+from meme_organizer.export.onnx.onnx_exporter import OnnxExporter
+from meme_organizer.export.onnx.onnx_quantizer import OnnxQuantizer
+from meme_organizer.retrieval.fusion.fusion_optimizer import FusionOptimizer
+from meme_organizer.retrieval.text.dense_text_retriever import DenseTextRetriever
+from meme_organizer.retrieval.text.fine_tuned_dense_retriever import FineTunedDenseRetriever
 
 if TYPE_CHECKING:
     from pathlib import Path

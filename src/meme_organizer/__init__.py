@@ -1,4 +1,4 @@
-"""Meme Organizer - On-device multimodal ML & retrieval pipeline."""
+"""Модуль Meme Organizer: мультимодальный ML и конвейер поиска на устройстве."""
 
 from meme_organizer.config import AppConfig
 

@@ -1,4 +1,4 @@
-"""CLI script for locally building a Mobile Delivery Bundle and publishing it to GitHub Releases."""
+"""CLI-скрипт для локальной сборки Mobile Delivery Bundle и публикации в GitHub Releases."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from meme_organizer.mobile.bundle_builder import MobileBundleBuilder, get_profile
-from meme_organizer.mobile.release_publisher import GitHubReleasePublisher
+from meme_organizer.export.bundle.mobile_bundle_builder import MobileBundleBuilder
+from meme_organizer.export.bundle.release_publisher import GitHubReleasePublisher
 
 logging.basicConfig(
     level=logging.INFO,
@@ -21,7 +21,7 @@ logger = logging.getLogger("publish_release")
 
 
 class ReleaseEnv(BaseSettings):
-    """Loads GITHUB_TOKEN from environment or .env file."""
+    """Загружает GITHUB_TOKEN из переменных окружения или файла .env."""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
     github_token: str = ""
@@ -63,7 +63,7 @@ def main() -> None:
     args = parser.parse_args()
 
     try:
-        profile = get_profile(args.profile)
+        profile = MobileBundleBuilder.get_profile(args.profile)
     except KeyError as exc:
         logger.error(str(exc))
         sys.exit(1)

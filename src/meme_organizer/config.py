@@ -1,4 +1,4 @@
-"""Configuration settings for Meme Organizer retrieval pipeline."""
+"""Настройки конфигурации конвейера поиска Meme Organizer."""
 
 from pathlib import Path
 
@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class AppConfig(BaseSettings):
-    """Global configuration loaded from environment or defaults."""
+    """Глобальная конфигурация, загружаемая из переменных окружения или значений по умолчанию."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
