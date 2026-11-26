@@ -50,7 +50,7 @@ class MobileBundleBuilder:
         self.run_full_eval = run_full_eval
         self.bundle_dir = work_dir / f"meme-organizer-{profile.profile_id}"
 
-    def build(self, output_tar: Path | None = None) -> Path:
+    def build(self, output_tar: Path | None = None, release_tag: str | None = None) -> Path:
         """Run the complete bundle build process."""
         if self.bundle_dir.exists():
             shutil.rmtree(self.bundle_dir)
@@ -145,6 +145,7 @@ class MobileBundleBuilder:
             },
         )
         manifest = PresetManifest(
+            release_tag=release_tag,
             model_name=self.profile.model_name,
             model_file="text_encoder_int8.onnx",
             embedding_dimension=self.profile.embedding_dim,

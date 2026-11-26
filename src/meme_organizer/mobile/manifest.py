@@ -65,6 +65,7 @@ class PresetManifest(BaseModel):
     """Declarative specification of the mobile model package contract."""
 
     schema_version: str = Field(default="1.1.0", description="Contract schema version")
+    release_tag: str | None = Field(default=None, description="GitHub Release tag (e.g. v0.2.0-mobile)")
     component: str = Field(default="text_encoder", description="Component name")
     model_name: str = Field(..., description="Canonical model identifier")
     model_file: str = Field(default="text_encoder_int8.onnx", description="ONNX binary filename")

@@ -77,7 +77,7 @@ def main() -> None:
 
     if not args.skip_build:
         builder = MobileBundleBuilder(profile=profile, work_dir=Path(".cache/bundle_build"))
-        target_archive = builder.build(output_tar=target_archive)
+        target_archive = builder.build(output_tar=target_archive, release_tag=args.tag)
     elif not target_archive.exists():
         logger.error("Архив не найден (--skip-build): %s", target_archive)
         sys.exit(1)

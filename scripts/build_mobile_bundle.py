@@ -30,6 +30,12 @@ def main() -> None:
         default=Path("dist/mobile_bundle"),
         help="Целевая директория для сохранения готового архива (по умолчанию: dist/mobile_bundle)",
     )
+    parser.add_argument(
+        "--release-tag",
+        type=str,
+        default=None,
+        help="Тег релиза для записи в preset_manifest.json (например: v0.2.0-mobile)",
+    )
     args = parser.parse_args()
 
     try:
@@ -42,7 +48,7 @@ def main() -> None:
     builder = MobileBundleBuilder(profile=profile, work_dir=work_dir)
 
     target_archive = args.output_dir / f"meme-organizer-{profile.profile_id}.tar.gz"
-    output_path = builder.build(output_tar=target_archive)
+    output_path = builder.build(output_tar=target_archive, release_tag=args.release_tag)
 
     logger.info("Успешно завершено! Архив: %s", output_path.resolve())
 

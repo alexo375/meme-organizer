@@ -178,7 +178,7 @@ def test_mobile_bundle_builder(tmp_path: Path, dummy_profile: ModelBundleProfile
     output_tar = tmp_path / "dist" / f"bundle-{dummy_profile.profile_id}.tar.gz"
 
     builder = MobileBundleBuilder(profile=dummy_profile, work_dir=work_dir, run_full_eval=False)
-    res_tar = builder.build(output_tar=output_tar)
+    res_tar = builder.build(output_tar=output_tar, release_tag="v0.2.0-mobile")
 
     assert res_tar.exists()
     assert res_tar.stat().st_size > 0
@@ -198,6 +198,7 @@ def test_mobile_bundle_builder(tmp_path: Path, dummy_profile: ModelBundleProfile
         assert manifest_file is not None
         manifest_data = json.load(manifest_file)
         manifest = PresetManifest.model_validate(manifest_data)
+        assert manifest.release_tag == "v0.2.0-mobile"
         assert manifest.component == "text_encoder"
         assert manifest.embedding_dimension == 312
         assert manifest.hybrid_scoring.dense_weight == 0.55
