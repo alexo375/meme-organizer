@@ -1,4 +1,5 @@
-from meme_organizer.config import LabelingConfig
-from meme_organizer.utils.seed import SeedManager
+"""Модуль Meme Organizer: мультимодальный ML и конвейер поиска на устройстве."""
 
-__all__ = ["LabelingConfig", "SeedManager"]
+from meme_organizer.config import AppConfig
+
+__all__ = ["AppConfig"]
