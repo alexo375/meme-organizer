@@ -111,8 +111,8 @@ class FineTunedDenseRetriever(DenseTextRetriever):
         torch.manual_seed(self.seed)
 
         if self._model is None or self._tokenizer is None:
-            self._tokenizer = AutoTokenizer.from_pretrained(self.hf_model_id)
-            self._model = AutoModel.from_pretrained(self.hf_model_id)
+            self._tokenizer = AutoTokenizer.from_pretrained(self.hf_model_id, revision="main")  # nosec B615
+            self._model = AutoModel.from_pretrained(self.hf_model_id, revision="main")  # nosec B615
 
         corpus_dict: dict[str, str] = {}
         for d in corpus_docs:

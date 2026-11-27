@@ -1,21 +1,24 @@
-"""Предустановленные профили моделей для экспорта мобильных пакетов."""
+"""Реестр профилей мобильных бандлов, загружаемых из JSON-конфигураций."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import json
+from pathlib import Path
+from typing import Any
+
+from pydantic import BaseModel, Field
 
 
-@dataclass(frozen=True)
-class ModelBundleProfile:
-    """Профиль параметров обучения и экспорта пакета модели."""
+class ModelBundleProfile(BaseModel):
+    """Параметры профиля модели для экспорта мобильного ONNX-бандла."""
 
     profile_id: str
     model_name: str
     base_hf_id: str
     embedding_dim: int
     max_length: int
-    query_prefix: str
-    passage_prefix: str
+    query_prefix: str = ""
+    passage_prefix: str = ""
     dense_weight: float
     bm25_weight: float
     epochs: int = 50
@@ -25,50 +28,18 @@ class ModelBundleProfile:
     lora_r: int = 8
     lora_alpha: int = 16
     seed: int = 42
-    extra_metadata: dict[str, str] = field(default_factory=dict)
+    extra_metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @classmethod
+    def load_all(cls, profiles_dir: Path | None = None) -> dict[str, ModelBundleProfile]:
+        """Загружает и валидирует все JSON-профили из директории ресурсов."""
+        target_dir = profiles_dir or Path(__file__).resolve().parents[2] / "resources" / "profiles"
+        profiles: dict[str, ModelBundleProfile] = {}
+        for json_path in sorted(target_dir.glob("*.json")):
+            data = json.loads(json_path.read_text(encoding="utf-8"))
+            profile = cls.model_validate(data)
+            profiles[profile.profile_id] = profile
+        return profiles
 
 
-# SOTA Champion: Fine-tuned multilingual-e5-small (weights will be refined/verified during build)
-TEXT_CHAMPION = ModelBundleProfile(
-    profile_id="text-champion",
-    model_name="multilingual-e5-small-finetuned",
-    base_hf_id="intfloat/multilingual-e5-small",
-    embedding_dim=384,
-    max_length=64,
-    query_prefix="query: ",
-    passage_prefix="passage: ",
-    dense_weight=0.52,
-    bm25_weight=0.48,
-    epochs=50,
-    patience=10,
-    lr=2e-4,
-    batch_size=32,
-    lora_r=8,
-    lora_alpha=16,
-    seed=42,
-)
-
-# Lightweight RuBERT-tiny2 option (~15 MB, ultra-fast)
-RUBERT_TINY2_FT = ModelBundleProfile(
-    profile_id="rubert-tiny2-finetuned",
-    model_name="rubert-tiny2-finetuned",
-    base_hf_id="cointegrated/rubert-tiny2",
-    embedding_dim=312,
-    max_length=64,
-    query_prefix="",
-    passage_prefix="",
-    dense_weight=0.50,
-    bm25_weight=0.50,
-    epochs=50,
-    patience=10,
-    lr=2e-4,
-    batch_size=32,
-    lora_r=8,
-    lora_alpha=16,
-    seed=42,
-)
-
-PROFILES: dict[str, ModelBundleProfile] = {
-    TEXT_CHAMPION.profile_id: TEXT_CHAMPION,
-    RUBERT_TINY2_FT.profile_id: RUBERT_TINY2_FT,
-}
+PROFILES: dict[str, ModelBundleProfile] = ModelBundleProfile.load_all()

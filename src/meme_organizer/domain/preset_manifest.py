@@ -27,7 +27,7 @@ class HybridScoringConfig(BaseModel):
             "b": 0.75,
             "epsilon": 0.25,
             "tokenizer_regex": r"[^\w]+",
-            "min_token_length": 2,
+            "min_token_length": 2,  # nosec B105
             "lowercase": True,
             "indexed_fields": ["user_caption", "rich_description", "transcript_or_text", "tags"],
         },

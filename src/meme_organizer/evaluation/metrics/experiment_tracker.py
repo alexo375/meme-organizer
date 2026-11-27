@@ -12,9 +12,14 @@ from typing import TYPE_CHECKING, Any
 
 import mlflow
 
+from meme_organizer.config import MlflowConfig
+from meme_organizer.evaluation.pipeline.base_experiment_pipeline import BaseExperimentPipeline
+
 if TYPE_CHECKING:
     from collections.abc import Generator
+    from types import TracebackType
 
+    from meme_organizer.domain.base_experiment_adapter import BaseExperimentAdapter
     from meme_organizer.domain.ranking_metrics import RankingMetrics
     from meme_organizer.evaluation.metrics.model_profiler import ProfilingResult
 
@@ -26,12 +31,28 @@ class ExperimentTracker:
 
     def __init__(
         self,
-        experiment_name: str = "meme-organizer-retrieval",
+        experiment_name: str = MlflowConfig.experiment_fusion,
         tracking_uri: str | None = None,
     ) -> None:
-        self.tracking_uri = tracking_uri or os.getenv("MLFLOW_TRACKING_URI") or "http://localhost:5000"
+        self.tracking_uri = tracking_uri or os.getenv("MLFLOW_TRACKING_URI") or MlflowConfig.default_tracking_uri
         mlflow.set_tracking_uri(self.tracking_uri)
         mlflow.set_experiment(experiment_name)
+
+    def __enter__(self) -> ExperimentTracker:
+        """Вход в контекстный менеджер, возвращает настроенный трекер."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        """Корректный выход из контекстного менеджера."""
+
+    def create_pipeline(self, adapter: BaseExperimentAdapter) -> BaseExperimentPipeline:
+        """Создаёт BaseExperimentPipeline, привязанный к текущему трекеру и адаптеру."""
+        return BaseExperimentPipeline(tracker=self, adapter=adapter)
 
     def log_epoch_metrics(self, epoch: int, metrics: dict[str, float]) -> None:
         """Логирует метрики обучения для заданной эпохи."""

@@ -66,6 +66,6 @@ class BundleModelLoader:
             retriever.fit(train_pairs=train_pairs, corpus_docs=corpus, val_pairs=val_pairs)
             return retriever._model, retriever._tokenizer
 
-        tokenizer = AutoTokenizer.from_pretrained(profile.base_hf_id)
-        model = AutoModel.from_pretrained(profile.base_hf_id)
+        tokenizer = AutoTokenizer.from_pretrained(profile.base_hf_id, revision="main")  # nosec B615
+        model = AutoModel.from_pretrained(profile.base_hf_id, revision="main")  # nosec B615
         return model, tokenizer

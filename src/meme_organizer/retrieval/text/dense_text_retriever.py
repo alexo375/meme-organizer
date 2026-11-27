@@ -54,8 +54,8 @@ class DenseTextRetriever(BaseRetriever):
             return
 
         logger.info("Загрузка FP32 модели %s (%s)...", self.model_name, self.hf_model_id)
-        self._tokenizer = AutoTokenizer.from_pretrained(self.hf_model_id)
-        self._model = AutoModel.from_pretrained(self.hf_model_id)
+        self._tokenizer = AutoTokenizer.from_pretrained(self.hf_model_id, revision="main")  # nosec B615
+        self._model = AutoModel.from_pretrained(self.hf_model_id, revision="main")  # nosec B615
 
     @staticmethod
     def _is_mlflow_reachable(tracking_uri: str) -> bool:
@@ -109,8 +109,8 @@ class DenseTextRetriever(BaseRetriever):
                     tracking_uri=cfg.mlflow_tracking_uri,
                 )
             )
-            self._tokenizer = AutoTokenizer.from_pretrained(str(local_dir))
-            self._model = AutoModel.from_pretrained(str(local_dir))
+            self._tokenizer = AutoTokenizer.from_pretrained(str(local_dir))  # nosec B615
+            self._model = AutoModel.from_pretrained(str(local_dir))  # nosec B615
             self._loaded_from_mlflow = True
             logger.info("Загружена чистая FP32 модель из MLflow (run=%s): %s", run_id[:8], local_dir)
         except Exception as exc:  # noqa: BLE001

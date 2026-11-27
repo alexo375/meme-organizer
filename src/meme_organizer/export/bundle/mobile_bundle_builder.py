@@ -88,9 +88,7 @@ class MobileBundleBuilder:
         OnnxExporter.export_tokenizer_assets(tokenizer, tokenizer_dir)
 
         session = onnxruntime.InferenceSession(str(onnx_model_path), providers=["CPUExecutionProvider"])
-        mean_cos, max_diff = self.evaluator.verify_pytorch_onnx_parity(
-            self.profile, model, tokenizer, session
-        )
+        mean_cos, max_diff = self.evaluator.verify_pytorch_onnx_parity(self.profile, model, tokenizer, session)
         logger.info(
             "Паритет PyTorch FP32 <-> ONNX INT8: mean_cosine=%.5f, max_abs_diff=%.5f",
             mean_cos,

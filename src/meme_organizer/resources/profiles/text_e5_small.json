@@ -1,0 +1,22 @@
+{
+  "profile_id": "multilingual-e5-small-finetuned",
+  "model_name": "multilingual-e5-small-finetuned",
+  "base_hf_id": "intfloat/multilingual-e5-small",
+  "embedding_dim": 384,
+  "max_length": 64,
+  "query_prefix": "query: ",
+  "passage_prefix": "passage: ",
+  "dense_weight": 0.36,
+  "bm25_weight": 0.64,
+  "epochs": 50,
+  "patience": 10,
+  "lr": 0.0002,
+  "batch_size": 32,
+  "lora_r": 8,
+  "lora_alpha": 16,
+  "seed": 42,
+  "extra_metadata": {
+    "release_tag": "v0.2.0-mobile",
+    "domains": ["text"]
+  }
+}
