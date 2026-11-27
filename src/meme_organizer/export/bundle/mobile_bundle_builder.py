@@ -189,13 +189,18 @@ class MobileBundleBuilder:
 
     def _bundle_multimodal_assets(self, config: AppConfig) -> None:
         """Упаковывает OCR, ASR и GatedAttentionFusion ONNX в мультимодальный бандл."""
-        # 1. OCR
+        # 1. OCR (detector + recognizer)
         ocr_dst = self.bundle_dir / "ocr"
         ocr_dst.mkdir(parents=True, exist_ok=True)
         ocr_src = Path("models/ocr/cyrillic_ppocrv5")
         for fname in ("inference.onnx", "dict.txt"):
             if (ocr_src / fname).exists():
                 shutil.copy2(ocr_src / fname, ocr_dst / fname)
+        import rapidocr_onnxruntime
+
+        det_candidates = list(Path(rapidocr_onnxruntime.__file__).parent.rglob("*det*.onnx"))
+        if det_candidates:
+            shutil.copy2(det_candidates[0], ocr_dst / "det.onnx")
 
         # 2. ASR (GigaAM-CTC INT8)
         asr_dst = self.bundle_dir / "asr"

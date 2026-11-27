@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+import onnx
 import torch
 from torch import nn
 
@@ -91,3 +93,8 @@ class GatedAttentionFusion(nn.Module):
             },
             opset_version=17,
         )
+        model_proto = onnx.load(output_path, load_external_data=True)
+        onnx.save_model(model_proto, output_path, save_as_external_data=False)
+        data_file = Path(f"{output_path}.data")
+        if data_file.exists():
+            data_file.unlink()

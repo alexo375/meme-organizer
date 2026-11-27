@@ -61,6 +61,17 @@ class BundleProvenance(BaseModel):
     evaluated_onnx_test_metrics: dict[str, float]
 
 
+class ComponentSpec(BaseModel):
+    """Описание отдельного ML-компонента в составе мобильного бандла."""
+
+    name: str
+    path: str
+    sha256: str
+    runtime: str
+    inputs: list[dict[str, Any]] = Field(default_factory=list)
+    outputs: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class PresetManifest(BaseModel):
     """Спецификация контракта мобильного пакета модели."""
 
@@ -95,4 +106,5 @@ class PresetManifest(BaseModel):
     tokenizer: TokenizerSpec = Field(default_factory=TokenizerSpec)
     hybrid_scoring: HybridScoringConfig = Field(default_factory=HybridScoringConfig)
     provenance: BundleProvenance | None = Field(default=None, description="Measured metrics and build checksums")
+    components: list[ComponentSpec] = Field(default_factory=list, description="Multimodal bundle components")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary additional metadata")

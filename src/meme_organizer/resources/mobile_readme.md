@@ -11,14 +11,15 @@
   - Mean Pooling и L2-нормализация встроены в ONNX-граф.
   - Входы: `input_ids` `[batch, $max_sequence_length]` (`int64`), `attention_mask` `[batch, $max_sequence_length]` (`int64`).
   - Выход: `sentence_embedding` `[batch, $embedding_dimension]` (`float32`), L2-норма = `1.0`.
-- `tokenizer/` — файлы токенизатора (`tokenizer.json`, `sentencepiece.bpe.model`, `tokenizer_config.json`, `special_tokens_map.json`).
-- `preset_manifest.json` — параметры модели, токенизации, формулы скоринга и метрики сборки (`schema_version: $schema_version`).
-- `smoke_test_pack.json` — эталонные входы и выходы для тестов паритета.
+- `tokenizer/` — файлы токенизатора (`tokenizer.json`, `tokenizer_config.json`).
+- `preset_manifest.json` — параметры модели, токенизации, формулы скоринга, список `components` с SHA-256 и метрики сборки (`schema_version: $schema_version`).
+- `smoke_test_pack.json` — эталонные входы и выходы для тестов паритета (текст + fusion).
 
 ### Дополнительные файлы (`v0.3.0-mobile`, `multimodal-v3`)
-- `ocr/` — `cyrillic_PP-OCRv5_mobile_rec_onnx` + `dict.txt` (ONNX FP32, ~15.5 МБ с детектором).
-- `asr/` — `GigaAM-CTC` (`model.int8.onnx` + `tokens.txt` для `sherpa-onnx`, INT8, ~262 МБ, без VAD).
-- `gated_attention_fusion.onnx` — Query-Conditioned Attention Gate (FP32, ~0.1 МБ).
+> Примечание: это OCR+ASR мультимодальность (без visual encoder и без визуального `tag_bank`).
+- `ocr/` — `det.onnx` (детектор PP-OCR из `rapidocr_onnxruntime`), `inference.onnx` (распознавание `cyrillic_PP-OCRv5_mobile_rec_onnx`) + `dict.txt`.
+- `asr/` — `GigaAM-CTC` (`model.int8.onnx` + `tokens.txt` для `sherpa-onnx` NeMo CTC, 16 kHz mono float32 PCM, чанкинг длинного аудио по 20–30 с на стороне клиента).
+- `gated_attention_fusion.onnx` — Query-Conditioned Attention Gate (единый ONNX-файл, ~0.1 МБ).
 
 ---
 
