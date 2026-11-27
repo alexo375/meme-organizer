@@ -17,6 +17,7 @@
   "seed": 42,
   "extra_metadata": {
     "release_tag": "v0.2.0-mobile",
+    "mlflow_run_name": "e5-small_lora",
     "domains": ["text"]
   }
 }

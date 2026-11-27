@@ -1,16 +1,16 @@
-"""Text encoder/retriever experiment adapter for BaseExperimentPipeline."""
+"""Адаптер текстовых экспериментов для BaseExperimentPipeline."""
 
 from __future__ import annotations
 
+import tempfile
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from meme_organizer.domain.base_experiment_adapter import BaseExperimentAdapter
 from meme_organizer.evaluation.pipeline.retrieval_evaluator import RetrievalEvaluator
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from meme_organizer.domain.base_retriever import BaseRetriever
     from meme_organizer.evaluation.metrics.experiment_tracker import ExperimentTracker
     from meme_organizer.evaluation.pipeline.evaluation_dataset_preparer import EvaluationSplitData
@@ -95,5 +95,16 @@ class TextExperimentAdapter(BaseExperimentAdapter):
         return self._eval_result.worst_queries
 
     def get_model_artifacts(self) -> dict[str, Path]:
-        """Return raw ONNX artifact path if provided."""
-        return {"onnx_raw": self.onnx_path} if self.onnx_path is not None else {}
+        """Возвращает пути к артефактам модели (PyTorch-директория и ONNX-файл)."""
+        artifacts: dict[str, Path] = {}
+        model = getattr(self.retriever, "_model", None)
+        tokenizer = getattr(self.retriever, "_tokenizer", None)
+        if model is not None and tokenizer is not None and hasattr(model, "save_pretrained"):
+            self._model_tmp_dir = tempfile.TemporaryDirectory()
+            model_dir = Path(self._model_tmp_dir.name)
+            model.save_pretrained(str(model_dir))
+            tokenizer.save_pretrained(str(model_dir))
+            artifacts["model"] = model_dir
+        if self.onnx_path is not None:
+            artifacts["onnx_raw"] = self.onnx_path
+        return artifacts

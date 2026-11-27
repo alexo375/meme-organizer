@@ -20,6 +20,15 @@ class MlflowConfig:
     top_k_worst_errors: int = 15
 
 
+MLFLOW_EXPERIMENT_TEXT = MlflowConfig.experiment_text
+MLFLOW_EXPERIMENT_OCR = MlflowConfig.experiment_ocr
+MLFLOW_EXPERIMENT_ASR = MlflowConfig.experiment_asr
+MLFLOW_EXPERIMENT_VISUAL = MlflowConfig.experiment_visual
+MLFLOW_EXPERIMENT_FUSION = MlflowConfig.experiment_fusion
+CYRILLIC_OCR_MODEL_PATH = Path("models/ocr/cyrillic_ppocrv5/inference.onnx")
+CYRILLIC_OCR_DICT_PATH = Path("models/ocr/cyrillic_ppocrv5/dict.txt")
+
+
 class AppConfig(BaseSettings):
     """Глобальная конфигурация, загружаемая из переменных окружения или значений по умолчанию."""
 

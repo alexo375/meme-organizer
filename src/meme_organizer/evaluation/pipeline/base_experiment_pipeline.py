@@ -67,5 +67,7 @@ class BaseExperimentPipeline:
     @staticmethod
     def _log_model_artifacts(artifacts: dict[str, Path]) -> None:
         for path in artifacts.values():
-            if path.exists():
+            if path.is_dir():
+                mlflow.log_artifacts(str(path), artifact_path="model")
+            elif path.exists():
                 mlflow.log_artifact(str(path), artifact_path="model")
