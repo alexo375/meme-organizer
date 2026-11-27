@@ -10,6 +10,7 @@ import logging
 import shutil
 import subprocess
 import tarfile
+import wave
 from pathlib import Path
 
 import mlflow
@@ -244,7 +245,17 @@ class MobileBundleBuilder:
                     runtime="onnxruntime",
                     inputs=[{"name": "x", "dtype": "float32", "shape": [1, 3, "h", "w"]}],
                     outputs=[{"name": "sigmoid_0.tmp_0", "dtype": "float32", "shape": [1, 1, "h", "w"]}],
-                    preprocessing={"color": "BGR", "resize_multiple": 32, "thresh": 0.3, "box_thresh": 0.5},
+                    preprocessing={
+                        "color": "BGR",
+                        "scale": 1.0 / 255.0,
+                        "mean": [0.485, 0.456, 0.406],
+                        "std": [0.229, 0.224, 0.225],
+                        "resize_multiple": 32,
+                        "thresh": 0.3,
+                        "box_thresh": 0.5,
+                        "unclip_ratio": 1.6,
+                        "max_candidates": 1000,
+                    },
                 )
             )
         if (ocr_dst / "inference.onnx").exists():
@@ -258,7 +269,13 @@ class MobileBundleBuilder:
                     runtime="onnxruntime",
                     inputs=[{"name": "x", "dtype": "float32", "shape": ["batch", 3, 48, "w"]}],
                     outputs=[{"name": "softmax_2.tmp_0", "dtype": "float32", "shape": ["batch", "seq", "vocab"]}],
-                    preprocessing={"height": 48, "normalize": "[-1, 1]", "decoding": "ctc_greedy"},
+                    preprocessing={
+                        "height": 48,
+                        "padding_value": 0,
+                        "mean": [0.5, 0.5, 0.5],
+                        "std": [0.5, 0.5, 0.5],
+                        "decoding": "ctc_greedy",
+                    },
                     auxiliary_files=ocr_aux,
                 )
             )
@@ -345,6 +362,7 @@ class MobileBundleBuilder:
                     "channel_scores": c_scores.tolist(),
                     "channel_mask": c_mask.tolist(),
                     "expected_fused_scores": [[round(float(x), 6) for x in fused[0]]],
+                    "atol": 1e-4,
                 }
             ]
 
@@ -354,16 +372,23 @@ class MobileBundleBuilder:
         img.save(buf, format="PNG")
         pack["ocr_tests"] = [
             {
+                "scope": "end_to_end_text",
                 "image_base64_png": base64.b64encode(buf.getvalue()).decode("ascii"),
                 "expected_text": "MEME",
             }
         ]
 
+        wav_buf = io.BytesIO()
+        pcm = np.zeros(8000, dtype=np.int16)
+        with wave.open(wav_buf, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(16000)
+            wf.writeframes(pcm.tobytes())
         pack["asr_tests"] = [
             {
                 "sample_rate": 16000,
-                "num_samples": 8000,
-                "pcm_f32_head": [0.0] * 16,
+                "wav_base64": base64.b64encode(wav_buf.getvalue()).decode("ascii"),
                 "expected_text": "",
                 "expected_segments": [],
             }
