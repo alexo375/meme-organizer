@@ -42,7 +42,7 @@
 `min_max_norm(x_i) = (x_i - min(x)) / max(max(x) - min(x), 1e-9)`
 
 ### Текстовый профиль (`v0.2.0-mobile`)
-`score = 0.36 * min_max_norm(cosine) + 0.64 * min_max_norm(bm25)`
+`score = 0.501 * min_max_norm(cosine) + 0.499 * min_max_norm(bm25)`
 
 ### Мультимодальный профиль (`v0.3.x-mobile`, `multimodal-v3`)
 **Индексация при импорте (в фоне через `WorkManager`):**
