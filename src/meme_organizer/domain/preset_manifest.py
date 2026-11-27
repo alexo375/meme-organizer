@@ -70,6 +70,8 @@ class ComponentSpec(BaseModel):
     runtime: str
     inputs: list[dict[str, Any]] = Field(default_factory=list)
     outputs: list[dict[str, Any]] = Field(default_factory=list)
+    preprocessing: dict[str, Any] = Field(default_factory=dict)
+    auxiliary_files: dict[str, str] = Field(default_factory=dict)
 
 
 class PresetManifest(BaseModel):

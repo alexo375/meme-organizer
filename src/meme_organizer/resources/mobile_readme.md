@@ -6,7 +6,7 @@
 
 ## 1. Состав пакета
 
-### Базовые файлы (`v0.2.0-mobile` и `v0.3.0-mobile`)
+### Базовые файлы (`v0.2.0-mobile` и `v0.3.x-mobile`)
 - `text_encoder_int8.onnx` — модель `$model_name` в формате ONNX (Dynamic INT8).
   - Mean Pooling и L2-нормализация встроены в ONNX-граф.
   - Входы: `input_ids` `[batch, $max_sequence_length]` (`int64`), `attention_mask` `[batch, $max_sequence_length]` (`int64`).
@@ -17,8 +17,8 @@
 
 ### Дополнительные файлы (`v0.3.x-mobile`, `multimodal-v3`)
 > Примечание: это OCR+ASR мультимодальность (без visual encoder и без визуального `tag_bank`).
-- `ocr/` — `det.onnx` (детектор PP-OCR из `rapidocr_onnxruntime`), `inference.onnx` (распознавание `cyrillic_PP-OCRv5_mobile_rec_onnx`) + `dict.txt`.
-- `asr/` — `GigaAM-CTC` (`model.int8.onnx` + `tokens.txt` для `sherpa-onnx` NeMo CTC, 16 kHz mono float32 PCM, чанкинг длинного аудио по 20–30 с на стороне клиента).
+- `ocr/` — `det.onnx` (PP-OCR детектор: BGR/RGB, resize с кратным 32, нормализация `(x/255 - mean)/std`, `thresh=0.3`, `box_thresh=0.5`), `inference.onnx` (`cyrillic_PP-OCRv5_mobile_rec_onnx`: высота 48, padding, нормализация `[-1, 1]`, CTC greedy decoding по `dict.txt`).
+- `asr/` — `GigaAM-CTC` (`model.int8.onnx` + `tokens.txt` для `sherpa-onnx` NeMo CTC: `sherpa-onnx` сам строит 80-dim log-mel fbank из 16 kHz mono float32 PCM, `blank_id` = последний токен в `tokens.txt`, чанкинг длинного аудио по 20–30 с на стороне клиента).
 - `gated_attention_fusion.onnx` — Query-Conditioned Attention Gate (единый ONNX-файл, ~0.1 МБ).
 
 ---
@@ -203,4 +203,7 @@ class SimpleBm25Engine(
 - `embedding_tests`: ожидаемый срез первых 8 компонент `embedding_head` и полный `full_embedding` (384D).
 - `similarity_tests`: ожидаемые значения косинусного сходства.
 - `hybrid_ranking_tests`: эталонный расчёт `dense_raw_scores`, `dense_norm_scores`, `bm25_raw_scores`, `bm25_norm_scores`, `hybrid_scores` и `expected_ranking` по 4 документам.
+- `fusion_tests`: эталонный расчёт `fused_scores` для `gated_attention_fusion.onnx` по `query_emb`, `channel_scores` и `channel_mask`.
+- `ocr_tests`: эталонный тест OCR (base64 PNG кропа с текстом и `expected_text`).
+- `asr_tests`: эталонный тест ASR (16 kHz PCM-фрагмент и `expected_text` / `expected_segments`).
 $prov_section

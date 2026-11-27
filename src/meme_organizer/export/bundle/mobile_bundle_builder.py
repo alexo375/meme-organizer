@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
+import io
 import json
 import logging
 import shutil
@@ -16,6 +18,7 @@ import onnxruntime
 import rapidocr_onnxruntime
 import torch
 from huggingface_hub import hf_hub_download
+from PIL import Image, ImageDraw
 
 from meme_organizer.config import AppConfig, MlflowConfig
 from meme_organizer.domain.preset_manifest import (
@@ -150,7 +153,7 @@ class MobileBundleBuilder:
         components: list[ComponentSpec] = [self._build_text_encoder_spec(onnx_model_path)]
         if isinstance(self.profile.extra_metadata.get("domains"), dict):
             components.extend(self._bundle_multimodal_assets(config))
-            self._append_fusion_smoke_test()
+            self._append_multimodal_smoke_tests()
 
         manifest_metadata = {**self.profile.extra_metadata}
         if release_tag:
@@ -202,6 +205,8 @@ class MobileBundleBuilder:
 
     def _build_text_encoder_spec(self, onnx_model_path: Path) -> ComponentSpec:
         """Формирует спецификацию текстового энкодера для манифеста."""
+        tok_path = self.bundle_dir / "tokenizer" / "tokenizer.json"
+        aux = {"tokenizer/tokenizer.json": self._compute_sha256(tok_path)} if tok_path.exists() else {}
         return ComponentSpec(
             name="text_encoder",
             path="text_encoder_int8.onnx",
@@ -214,6 +219,7 @@ class MobileBundleBuilder:
             outputs=[
                 {"name": "sentence_embedding", "dtype": "float32", "shape": ["batch", self.profile.embedding_dim]},
             ],
+            auxiliary_files=aux,
         )
 
     def _bundle_multimodal_assets(self, config: AppConfig) -> list[ComponentSpec]:
@@ -238,9 +244,12 @@ class MobileBundleBuilder:
                     runtime="onnxruntime",
                     inputs=[{"name": "x", "dtype": "float32", "shape": [1, 3, "h", "w"]}],
                     outputs=[{"name": "sigmoid_0.tmp_0", "dtype": "float32", "shape": [1, 1, "h", "w"]}],
+                    preprocessing={"color": "BGR", "resize_multiple": 32, "thresh": 0.3, "box_thresh": 0.5},
                 )
             )
         if (ocr_dst / "inference.onnx").exists():
+            dict_path = ocr_dst / "dict.txt"
+            ocr_aux = {"ocr/dict.txt": self._compute_sha256(dict_path)} if dict_path.exists() else {}
             specs.append(
                 ComponentSpec(
                     name="ocr_rec",
@@ -249,6 +258,8 @@ class MobileBundleBuilder:
                     runtime="onnxruntime",
                     inputs=[{"name": "x", "dtype": "float32", "shape": ["batch", 3, 48, "w"]}],
                     outputs=[{"name": "softmax_2.tmp_0", "dtype": "float32", "shape": ["batch", "seq", "vocab"]}],
+                    preprocessing={"height": 48, "normalize": "[-1, 1]", "decoding": "ctc_greedy"},
+                    auxiliary_files=ocr_aux,
                 )
             )
 
@@ -259,6 +270,8 @@ class MobileBundleBuilder:
         for fname in ("model.int8.onnx", "tokens.txt"):
             src_file = hf_hub_download(repo_id=asr_repo, filename=fname, revision="main")  # nosec B615
             shutil.copy2(src_file, asr_dst / fname)
+        tok_asr_path = asr_dst / "tokens.txt"
+        asr_aux = {"asr/tokens.txt": self._compute_sha256(tok_asr_path)} if tok_asr_path.exists() else {}
         specs.append(
             ComponentSpec(
                 name="asr",
@@ -267,6 +280,8 @@ class MobileBundleBuilder:
                 runtime="sherpa-onnx",
                 inputs=[{"name": "audio_signal", "dtype": "float32", "shape": ["batch", 80, "frames"]}],
                 outputs=[{"name": "logprobs", "dtype": "float32", "shape": ["batch", "t", "vocab"]}],
+                preprocessing={"sample_rate": 16000, "pcm": "mono_float32", "fbank_by": "sherpa-onnx"},
+                auxiliary_files=asr_aux,
             )
         )
 
@@ -309,30 +324,48 @@ class MobileBundleBuilder:
                 )
         return specs
 
-    def _append_fusion_smoke_test(self) -> None:
-        """Добавляет эталонный тест для gated_attention_fusion.onnx в smoke_test_pack.json."""
-        fusion_path = self.bundle_dir / "gated_attention_fusion.onnx"
+    def _append_multimodal_smoke_tests(self) -> None:
+        """Добавляет эталонные тесты для fusion, OCR и ASR в smoke_test_pack.json."""
         smoke_path = self.bundle_dir / "smoke_test_pack.json"
-        if not fusion_path.exists() or not smoke_path.exists():
+        if not smoke_path.exists():
             return
-
-        rng = np.random.default_rng(42)
-        q_emb = rng.standard_normal((1, self.profile.embedding_dim), dtype=np.float32)
-        c_scores = np.array(
-            [[[0.9, 0.8, 0.7, 0.0], [0.2, 0.3, 0.0, 0.6]]],
-            dtype=np.float32,
-        )
-        c_mask = np.array([[True, True, True, False], [True, True, False, True]], dtype=bool)
-        sess = onnxruntime.InferenceSession(str(fusion_path), providers=["CPUExecutionProvider"])
-        fused = sess.run(None, {"query_emb": q_emb, "channel_scores": c_scores, "channel_mask": c_mask})[0]
-
         pack = json.loads(smoke_path.read_text(encoding="utf-8"))
-        pack["fusion_tests"] = [
+
+        fusion_path = self.bundle_dir / "gated_attention_fusion.onnx"
+        if fusion_path.exists():
+            rng = np.random.default_rng(42)
+            q_emb = rng.standard_normal((1, self.profile.embedding_dim), dtype=np.float32)
+            c_scores = np.array([[[0.9, 0.8, 0.7, 0.0], [0.2, 0.3, 0.0, 0.6]]], dtype=np.float32)
+            c_mask = np.array([[True, True, True, False], [True, True, False, True]], dtype=bool)
+            sess = onnxruntime.InferenceSession(str(fusion_path), providers=["CPUExecutionProvider"])
+            fused = sess.run(None, {"query_emb": q_emb, "channel_scores": c_scores, "channel_mask": c_mask})[0]
+            pack["fusion_tests"] = [
+                {
+                    "query_emb": [round(float(x), 6) for x in q_emb[0]],
+                    "channel_scores": c_scores.tolist(),
+                    "channel_mask": c_mask.tolist(),
+                    "expected_fused_scores": [[round(float(x), 6) for x in fused[0]]],
+                }
+            ]
+
+        img = Image.new("RGB", (200, 60), color=(255, 255, 255))
+        ImageDraw.Draw(img).text((20, 20), "MEME", fill=(0, 0, 0))
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        pack["ocr_tests"] = [
             {
-                "query_emb": [round(float(x), 6) for x in q_emb[0]],
-                "channel_scores": c_scores.tolist(),
-                "channel_mask": c_mask.tolist(),
-                "expected_fused_scores": [[round(float(x), 6) for x in fused[0]]],
+                "image_base64_png": base64.b64encode(buf.getvalue()).decode("ascii"),
+                "expected_text": "MEME",
+            }
+        ]
+
+        pack["asr_tests"] = [
+            {
+                "sample_rate": 16000,
+                "num_samples": 8000,
+                "pcm_f32_head": [0.0] * 16,
+                "expected_text": "",
+                "expected_segments": [],
             }
         ]
         smoke_path.write_text(json.dumps(pack, ensure_ascii=False, indent=2), encoding="utf-8")

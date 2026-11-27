@@ -72,6 +72,8 @@ class SmokeTestPack(BaseModel):
     similarity_tests: list[SmokePairTest]
     hybrid_ranking_tests: list[SmokeHybridRankingTest]
     fusion_tests: list[dict[str, Any]] = Field(default_factory=list)
+    ocr_tests: list[dict[str, Any]] = Field(default_factory=list)
+    asr_tests: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class SmokeTestGenerator:
