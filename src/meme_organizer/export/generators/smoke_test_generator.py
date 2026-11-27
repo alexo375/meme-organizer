@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 from pydantic import BaseModel, Field
@@ -71,6 +71,7 @@ class SmokeTestPack(BaseModel):
     samples: list[SmokeSample]
     similarity_tests: list[SmokePairTest]
     hybrid_ranking_tests: list[SmokeHybridRankingTest]
+    fusion_tests: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class SmokeTestGenerator:

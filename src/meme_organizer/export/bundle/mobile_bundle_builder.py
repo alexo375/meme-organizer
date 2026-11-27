@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import shutil
 import subprocess
@@ -10,13 +11,16 @@ import tarfile
 from pathlib import Path
 
 import mlflow
+import numpy as np
 import onnxruntime
+import rapidocr_onnxruntime
 import torch
 from huggingface_hub import hf_hub_download
 
 from meme_organizer.config import AppConfig, MlflowConfig
 from meme_organizer.domain.preset_manifest import (
     BundleProvenance,
+    ComponentSpec,
     HybridScoringConfig,
     PresetManifest,
     TokenizerSpec,
@@ -143,6 +147,15 @@ class MobileBundleBuilder:
                 "unk": int(tokenizer.unk_token_id or 3),
             },
         )
+        components: list[ComponentSpec] = [self._build_text_encoder_spec(onnx_model_path)]
+        if isinstance(self.profile.extra_metadata.get("domains"), dict):
+            components.extend(self._bundle_multimodal_assets(config))
+            self._append_fusion_smoke_test()
+
+        manifest_metadata = {**self.profile.extra_metadata}
+        if release_tag:
+            manifest_metadata["release_tag"] = release_tag
+
         manifest = PresetManifest(
             release_tag=release_tag,
             model_name=self.profile.model_name,
@@ -160,7 +173,8 @@ class MobileBundleBuilder:
                 formula=f"{round(dense_weight, 4)} * minmax(cosine_similarity) + {round(bm25_weight, 4)} * minmax(bm25_score)",
             ),
             provenance=provenance,
-            metadata=self.profile.extra_metadata,
+            components=components,
+            metadata=manifest_metadata,
         )
         manifest_path = self.bundle_dir / "preset_manifest.json"
         with open(manifest_path, "w", encoding="utf-8") as f:
@@ -172,23 +186,40 @@ class MobileBundleBuilder:
         with open(readme_path, "w", encoding="utf-8") as f:
             f.write(readme_content)
 
-        if isinstance(self.profile.extra_metadata.get("domains"), dict):
-            self._bundle_multimodal_assets(config)
+        return self._archive_bundle(output_tar)
 
+    def _archive_bundle(self, output_tar: Path | None) -> Path:
+        """Архивирует собранную директорию бандла в tar.gz."""
         if output_tar is None:
             output_tar = self.work_dir / f"meme-organizer-{self.profile.profile_id}.tar.gz"
-
         output_tar.parent.mkdir(parents=True, exist_ok=True)
         logger.info("Архивация бандла в %s...", output_tar)
         with tarfile.open(output_tar, "w:gz") as tar:
             tar.add(self.bundle_dir, arcname=self.bundle_dir.name)
-
         size_mb = output_tar.stat().st_size / (1024 * 1024)
         logger.info("✅ Пакет поставки успешно собран: %s (размер: %.2f МБ)", output_tar, size_mb)
         return output_tar
 
-    def _bundle_multimodal_assets(self, config: AppConfig) -> None:
+    def _build_text_encoder_spec(self, onnx_model_path: Path) -> ComponentSpec:
+        """Формирует спецификацию текстового энкодера для манифеста."""
+        return ComponentSpec(
+            name="text_encoder",
+            path="text_encoder_int8.onnx",
+            sha256=self._compute_sha256(onnx_model_path),
+            runtime="onnxruntime",
+            inputs=[
+                {"name": "input_ids", "dtype": "int64", "shape": ["batch", self.profile.max_length]},
+                {"name": "attention_mask", "dtype": "int64", "shape": ["batch", self.profile.max_length]},
+            ],
+            outputs=[
+                {"name": "sentence_embedding", "dtype": "float32", "shape": ["batch", self.profile.embedding_dim]},
+            ],
+        )
+
+    def _bundle_multimodal_assets(self, config: AppConfig) -> list[ComponentSpec]:
         """Упаковывает OCR, ASR и GatedAttentionFusion ONNX в мультимодальный бандл."""
+        specs: list[ComponentSpec] = []
+
         # 1. OCR (detector + recognizer)
         ocr_dst = self.bundle_dir / "ocr"
         ocr_dst.mkdir(parents=True, exist_ok=True)
@@ -196,11 +227,30 @@ class MobileBundleBuilder:
         for fname in ("inference.onnx", "dict.txt"):
             if (ocr_src / fname).exists():
                 shutil.copy2(ocr_src / fname, ocr_dst / fname)
-        import rapidocr_onnxruntime
-
         det_candidates = list(Path(rapidocr_onnxruntime.__file__).parent.rglob("*det*.onnx"))
         if det_candidates:
             shutil.copy2(det_candidates[0], ocr_dst / "det.onnx")
+            specs.append(
+                ComponentSpec(
+                    name="ocr_det",
+                    path="ocr/det.onnx",
+                    sha256=self._compute_sha256(ocr_dst / "det.onnx"),
+                    runtime="onnxruntime",
+                    inputs=[{"name": "x", "dtype": "float32", "shape": [1, 3, "h", "w"]}],
+                    outputs=[{"name": "sigmoid_0.tmp_0", "dtype": "float32", "shape": [1, 1, "h", "w"]}],
+                )
+            )
+        if (ocr_dst / "inference.onnx").exists():
+            specs.append(
+                ComponentSpec(
+                    name="ocr_rec",
+                    path="ocr/inference.onnx",
+                    sha256=self._compute_sha256(ocr_dst / "inference.onnx"),
+                    runtime="onnxruntime",
+                    inputs=[{"name": "x", "dtype": "float32", "shape": ["batch", 3, 48, "w"]}],
+                    outputs=[{"name": "softmax_2.tmp_0", "dtype": "float32", "shape": ["batch", "seq", "vocab"]}],
+                )
+            )
 
         # 2. ASR (GigaAM-CTC INT8)
         asr_dst = self.bundle_dir / "asr"
@@ -209,6 +259,16 @@ class MobileBundleBuilder:
         for fname in ("model.int8.onnx", "tokens.txt"):
             src_file = hf_hub_download(repo_id=asr_repo, filename=fname, revision="main")  # nosec B615
             shutil.copy2(src_file, asr_dst / fname)
+        specs.append(
+            ComponentSpec(
+                name="asr",
+                path="asr/model.int8.onnx",
+                sha256=self._compute_sha256(asr_dst / "model.int8.onnx"),
+                runtime="sherpa-onnx",
+                inputs=[{"name": "audio_signal", "dtype": "float32", "shape": ["batch", 80, "frames"]}],
+                outputs=[{"name": "logprobs", "dtype": "float32", "shape": ["batch", "t", "vocab"]}],
+            )
+        )
 
         # 3. GatedAttentionFusion ONNX
         client = mlflow.MlflowClient(tracking_uri=config.mlflow_tracking_uri)
@@ -227,11 +287,55 @@ class MobileBundleBuilder:
                 )
                 gate = GatedAttentionFusion(query_dim=self.profile.embedding_dim, num_channels=4, hidden_dim=64)
                 gate.load_state_dict(torch.load(pt_path, map_location="cpu", weights_only=True))
-                gate.export_onnx(
-                    str(self.bundle_dir / "gated_attention_fusion.onnx"),
-                    query_dim=self.profile.embedding_dim,
-                    num_channels=4,
+                fusion_path = self.bundle_dir / "gated_attention_fusion.onnx"
+                gate.export_onnx(str(fusion_path), query_dim=self.profile.embedding_dim, num_channels=4)
+                specs.append(
+                    ComponentSpec(
+                        name="fusion",
+                        path="gated_attention_fusion.onnx",
+                        sha256=self._compute_sha256(fusion_path),
+                        runtime="onnxruntime",
+                        inputs=[
+                            {
+                                "name": "query_emb",
+                                "dtype": "float32",
+                                "shape": ["n_queries", self.profile.embedding_dim],
+                            },
+                            {"name": "channel_scores", "dtype": "float32", "shape": ["n_queries", "n_docs", 4]},
+                            {"name": "channel_mask", "dtype": "bool", "shape": ["n_docs", 4]},
+                        ],
+                        outputs=[{"name": "fused_scores", "dtype": "float32", "shape": ["n_queries", "n_docs"]}],
+                    )
                 )
+        return specs
+
+    def _append_fusion_smoke_test(self) -> None:
+        """Добавляет эталонный тест для gated_attention_fusion.onnx в smoke_test_pack.json."""
+        fusion_path = self.bundle_dir / "gated_attention_fusion.onnx"
+        smoke_path = self.bundle_dir / "smoke_test_pack.json"
+        if not fusion_path.exists() or not smoke_path.exists():
+            return
+
+        rng = np.random.default_rng(42)
+        q_emb = rng.standard_normal((1, self.profile.embedding_dim), dtype=np.float32)
+        c_scores = np.array(
+            [[[0.9, 0.8, 0.7, 0.0], [0.2, 0.3, 0.0, 0.6]]],
+            dtype=np.float32,
+        )
+        c_mask = np.array([[True, True, True, False], [True, True, False, True]], dtype=bool)
+        sess = onnxruntime.InferenceSession(str(fusion_path), providers=["CPUExecutionProvider"])
+        fused = sess.run(None, {"query_emb": q_emb, "channel_scores": c_scores, "channel_mask": c_mask})[0]
+
+        pack = json.loads(smoke_path.read_text(encoding="utf-8"))
+        pack["fusion_tests"] = [
+            {
+                "query_emb": [round(float(x), 6) for x in q_emb[0]],
+                "channel_scores": c_scores.tolist(),
+                "channel_mask": c_mask.tolist(),
+                "expected_fused_scores": [[round(float(x), 6) for x in fused[0]]],
+            }
+        ]
+        smoke_path.write_text(json.dumps(pack, ensure_ascii=False, indent=2), encoding="utf-8")
 
     @staticmethod
     def _compute_sha256(file_path: Path) -> str:

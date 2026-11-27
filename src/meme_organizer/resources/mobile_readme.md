@@ -2,7 +2,7 @@
 
 Пакет для локального поиска мемов и видеореакций в Android-приложении. Поддерживает два профиля поставки:
 - `v0.2.0-mobile` (`multilingual-e5-small-finetuned`): текстовый поиск (Dense + BM25).
-- `v0.3.0-mobile` (`multimodal-v3`): мультимодальный поиск по 4 каналам (BM25 + Meta + OCR + ASR) с `gated_attention_fusion.onnx`.
+- `v0.3.x-mobile` (`multimodal-v3`): мультимодальный поиск по 4 каналам (BM25 + Meta + OCR + ASR) с `gated_attention_fusion.onnx`.
 
 ## 1. Состав пакета
 
@@ -15,7 +15,7 @@
 - `preset_manifest.json` — параметры модели, токенизации, формулы скоринга, список `components` с SHA-256 и метрики сборки (`schema_version: $schema_version`).
 - `smoke_test_pack.json` — эталонные входы и выходы для тестов паритета (текст + fusion).
 
-### Дополнительные файлы (`v0.3.0-mobile`, `multimodal-v3`)
+### Дополнительные файлы (`v0.3.x-mobile`, `multimodal-v3`)
 > Примечание: это OCR+ASR мультимодальность (без visual encoder и без визуального `tag_bank`).
 - `ocr/` — `det.onnx` (детектор PP-OCR из `rapidocr_onnxruntime`), `inference.onnx` (распознавание `cyrillic_PP-OCRv5_mobile_rec_onnx`) + `dict.txt`.
 - `asr/` — `GigaAM-CTC` (`model.int8.onnx` + `tokens.txt` для `sherpa-onnx` NeMo CTC, 16 kHz mono float32 PCM, чанкинг длинного аудио по 20–30 с на стороне клиента).
@@ -44,7 +44,7 @@
 ### Текстовый профиль (`v0.2.0-mobile`)
 `score = $w_dense * min_max_norm(cosine) + $w_bm25 * min_max_norm(bm25)`
 
-### Мультимодальный профиль (`v0.3.0-mobile`, `multimodal-v3`)
+### Мультимодальный профиль (`v0.3.x-mobile`, `multimodal-v3`)
 **Индексация при импорте (в фоне через `WorkManager`):**
 - Сохранить `ocr_text` (картинки: `raw`; видео/GIF: `uniform_3` кадров с дедупликацией строк) и `asr_text` (моно 16 kHz PCM из видео) в SQLite + `FTS5`.
 - Закодировать через `text_encoder_int8.onnx` до 3 отдельных векторов `float[384]` на мем:

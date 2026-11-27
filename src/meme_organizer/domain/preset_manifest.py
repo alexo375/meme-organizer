@@ -39,7 +39,7 @@ class TokenizerSpec(BaseModel):
     """Параметры токенизации и идентификаторы служебных токенов для мобильного клиента."""
 
     recommended_asset: str = Field(default="tokenizer/tokenizer.json")
-    fallback_sentencepiece: str = Field(default="tokenizer/sentencepiece.bpe.model")
+    fallback_sentencepiece: str | None = Field(default=None)
     padding: str = Field(default="max_length")
     truncation: bool = Field(default=True)
     max_length: int = Field(default=64)
