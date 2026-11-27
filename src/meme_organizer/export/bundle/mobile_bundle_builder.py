@@ -7,11 +7,14 @@ import logging
 import shutil
 import subprocess
 import tarfile
-from typing import TYPE_CHECKING
+from pathlib import Path
 
+import mlflow
 import onnxruntime
+import torch
+from huggingface_hub import hf_hub_download
 
-from meme_organizer.config import AppConfig
+from meme_organizer.config import AppConfig, MlflowConfig
 from meme_organizer.domain.preset_manifest import (
     BundleProvenance,
     HybridScoringConfig,
@@ -25,9 +28,7 @@ from meme_organizer.export.generators.smoke_test_generator import SmokeTestGener
 from meme_organizer.export.onnx.onnx_bundle_evaluator import OnnxBundleEvaluator
 from meme_organizer.export.onnx.onnx_exporter import OnnxExporter
 from meme_organizer.export.onnx.onnx_quantizer import OnnxQuantizer
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from meme_organizer.retrieval.fusion.gated_attention_fusion import GatedAttentionFusion
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +172,9 @@ class MobileBundleBuilder:
         with open(readme_path, "w", encoding="utf-8") as f:
             f.write(readme_content)
 
+        if isinstance(self.profile.extra_metadata.get("domains"), dict):
+            self._bundle_multimodal_assets(config)
+
         if output_tar is None:
             output_tar = self.work_dir / f"meme-organizer-{self.profile.profile_id}.tar.gz"
 
@@ -182,6 +186,47 @@ class MobileBundleBuilder:
         size_mb = output_tar.stat().st_size / (1024 * 1024)
         logger.info("✅ Пакет поставки успешно собран: %s (размер: %.2f МБ)", output_tar, size_mb)
         return output_tar
+
+    def _bundle_multimodal_assets(self, config: AppConfig) -> None:
+        """Упаковывает OCR, ASR и GatedAttentionFusion ONNX в мультимодальный бандл."""
+        # 1. OCR
+        ocr_dst = self.bundle_dir / "ocr"
+        ocr_dst.mkdir(parents=True, exist_ok=True)
+        ocr_src = Path("models/ocr/cyrillic_ppocrv5")
+        for fname in ("inference.onnx", "dict.txt"):
+            if (ocr_src / fname).exists():
+                shutil.copy2(ocr_src / fname, ocr_dst / fname)
+
+        # 2. ASR (GigaAM-CTC INT8)
+        asr_dst = self.bundle_dir / "asr"
+        asr_dst.mkdir(parents=True, exist_ok=True)
+        asr_repo = "csukuangfj/sherpa-onnx-nemo-ctc-giga-am-russian-2024-10-24"
+        for fname in ("model.int8.onnx", "tokens.txt"):
+            src_file = hf_hub_download(repo_id=asr_repo, filename=fname, revision="main")  # nosec B615
+            shutil.copy2(src_file, asr_dst / fname)
+
+        # 3. GatedAttentionFusion ONNX
+        client = mlflow.MlflowClient(tracking_uri=config.mlflow_tracking_uri)
+        exp = client.get_experiment_by_name(MlflowConfig.experiment_fusion)
+        if exp is not None:
+            runs = client.search_runs(
+                [exp.experiment_id],
+                filter_string="tags.mlflow.runName = 'fusion_gated_attention_4ch' and attributes.status = 'FINISHED'",
+                max_results=1,
+            )
+            if runs:
+                pt_path = mlflow.artifacts.download_artifacts(
+                    run_id=runs[0].info.run_id,
+                    artifact_path="model/gated_attention_fusion.pt",
+                    tracking_uri=config.mlflow_tracking_uri,
+                )
+                gate = GatedAttentionFusion(query_dim=self.profile.embedding_dim, num_channels=4, hidden_dim=64)
+                gate.load_state_dict(torch.load(pt_path, map_location="cpu", weights_only=True))
+                gate.export_onnx(
+                    str(self.bundle_dir / "gated_attention_fusion.onnx"),
+                    query_dim=self.profile.embedding_dim,
+                    num_channels=4,
+                )
 
     @staticmethod
     def _compute_sha256(file_path: Path) -> str:
