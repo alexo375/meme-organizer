@@ -34,3 +34,5 @@ mlartifacts/
 
 # Agents
 .agents/
+
+mlruns/

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from transformers import AutoModel, AutoTokenizer
 
+from meme_organizer.config import MlflowConfig
 from meme_organizer.data.dataset_loader import DatasetLoader
 from meme_organizer.retrieval.text.dense_text_retriever import DenseTextRetriever
 from meme_organizer.retrieval.text.fine_tuned_dense_retriever import FineTunedDenseRetriever
@@ -34,17 +35,19 @@ class BundleModelLoader:
         Выход: кортеж (PreTrainedModel, PreTrainedTokenizerBase).
         """
         if "finetuned" in profile.model_name:
+            mlflow_run_name = str(profile.extra_metadata.get("mlflow_run_name", f"{profile.model_name}_test"))
             dense_loader = DenseTextRetriever(
                 model_name=profile.model_name,
                 hf_model_id=profile.base_hf_id,
-                mlflow_run_name=f"{profile.model_name}_test",
+                mlflow_run_name=mlflow_run_name,
+                mlflow_experiment_name=MlflowConfig.experiment_text,
             )
             dense_loader.load_or_build()
             if dense_loader._loaded_from_mlflow:
                 logger.info("Используются чистые FP32 веса из MLflow для сборки бандла.")
                 return dense_loader._model, dense_loader._tokenizer
 
-            logger.info("Дообучение адаптера для модели %s (MLflow недоступен)...", profile.model_name)
+            logger.info("Дообучение адаптера для модели %s (run не найден в MLflow)...", profile.model_name)
             retriever = FineTunedDenseRetriever(
                 model_name=profile.model_name,
                 base_model_id=profile.base_hf_id,
@@ -66,6 +69,6 @@ class BundleModelLoader:
             retriever.fit(train_pairs=train_pairs, corpus_docs=corpus, val_pairs=val_pairs)
             return retriever._model, retriever._tokenizer
 
-        tokenizer = AutoTokenizer.from_pretrained(profile.base_hf_id)
-        model = AutoModel.from_pretrained(profile.base_hf_id)
+        tokenizer = AutoTokenizer.from_pretrained(profile.base_hf_id, revision="main")  # nosec B615
+        model = AutoModel.from_pretrained(profile.base_hf_id, revision="main")  # nosec B615
         return model, tokenizer

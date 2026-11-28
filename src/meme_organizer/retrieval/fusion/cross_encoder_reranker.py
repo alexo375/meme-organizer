@@ -28,7 +28,7 @@ class CrossEncoderReranker:
         self.models_dir = Path(models_dir)
         self.safe_name = model_name.replace("/", "_")
         self.onnx_path = self.models_dir / "onnx" / f"{self.safe_name}_int8.onnx"
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name, revision="main")  # nosec B615
         self.session: ort.InferenceSession | None = None
 
     def export_and_quantize(self) -> Path:
@@ -47,7 +47,7 @@ class CrossEncoderReranker:
         fp32_path = onnx_dir / f"{self.safe_name}_fp32.onnx"
 
         logger.info("Экспорт кросс-энкодера %s в ONNX FP32...", self.model_name)
-        model = AutoModelForSequenceClassification.from_pretrained(self.model_name)
+        model = AutoModelForSequenceClassification.from_pretrained(self.model_name, revision="main")  # nosec B615
         model.eval()
 
         dummy_tokens = self.tokenizer(

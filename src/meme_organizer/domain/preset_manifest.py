@@ -27,7 +27,7 @@ class HybridScoringConfig(BaseModel):
             "b": 0.75,
             "epsilon": 0.25,
             "tokenizer_regex": r"[^\w]+",
-            "min_token_length": 2,
+            "min_token_length": 2,  # nosec B105
             "lowercase": True,
             "indexed_fields": ["user_caption", "rich_description", "transcript_or_text", "tags"],
         },
@@ -39,7 +39,7 @@ class TokenizerSpec(BaseModel):
     """Параметры токенизации и идентификаторы служебных токенов для мобильного клиента."""
 
     recommended_asset: str = Field(default="tokenizer/tokenizer.json")
-    fallback_sentencepiece: str = Field(default="tokenizer/sentencepiece.bpe.model")
+    fallback_sentencepiece: str | None = Field(default=None)
     padding: str = Field(default="max_length")
     truncation: bool = Field(default=True)
     max_length: int = Field(default=64)
@@ -59,6 +59,19 @@ class BundleProvenance(BaseModel):
     pytorch_onnx_mean_cosine_similarity: float
     pytorch_onnx_max_abs_diff: float
     evaluated_onnx_test_metrics: dict[str, float]
+
+
+class ComponentSpec(BaseModel):
+    """Описание отдельного ML-компонента в составе мобильного бандла."""
+
+    name: str
+    path: str
+    sha256: str
+    runtime: str
+    inputs: list[dict[str, Any]] = Field(default_factory=list)
+    outputs: list[dict[str, Any]] = Field(default_factory=list)
+    preprocessing: dict[str, Any] = Field(default_factory=dict)
+    auxiliary_files: dict[str, str] = Field(default_factory=dict)
 
 
 class PresetManifest(BaseModel):
@@ -95,4 +108,5 @@ class PresetManifest(BaseModel):
     tokenizer: TokenizerSpec = Field(default_factory=TokenizerSpec)
     hybrid_scoring: HybridScoringConfig = Field(default_factory=HybridScoringConfig)
     provenance: BundleProvenance | None = Field(default=None, description="Measured metrics and build checksums")
+    components: list[ComponentSpec] = Field(default_factory=list, description="Multimodal bundle components")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary additional metadata")

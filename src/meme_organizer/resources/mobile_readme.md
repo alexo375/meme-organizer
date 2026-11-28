@@ -1,15 +1,25 @@
-# Meme Organizer Text Engine (Mobile ONNX)
+# Meme Organizer Mobile ML Engine (ONNX)
 
-Пакет для локального текстового поиска в Android-приложении.
+Пакет для локального поиска мемов и видеореакций в Android-приложении. Поддерживает два профиля поставки:
+- `v0.2.0-mobile` (`multilingual-e5-small-finetuned`): текстовый поиск (Dense + BM25).
+- `v0.3.x-mobile` (`multimodal-v3`): мультимодальный поиск по 4 каналам (BM25 + Meta + OCR + ASR) с `gated_attention_fusion.onnx`.
 
 ## 1. Состав пакета
+
+### Базовые файлы (`v0.2.0-mobile` и `v0.3.x-mobile`)
 - `text_encoder_int8.onnx` — модель `$model_name` в формате ONNX (Dynamic INT8).
   - Mean Pooling и L2-нормализация встроены в ONNX-граф.
   - Входы: `input_ids` `[batch, $max_sequence_length]` (`int64`), `attention_mask` `[batch, $max_sequence_length]` (`int64`).
   - Выход: `sentence_embedding` `[batch, $embedding_dimension]` (`float32`), L2-норма = `1.0`.
-- `tokenizer/` — файлы токенизатора (`tokenizer.json`, `sentencepiece.bpe.model`, `tokenizer_config.json`, `special_tokens_map.json`).
-- `preset_manifest.json` — параметры модели, токенизации, формулы скоринга и метрики сборки (`schema_version: $schema_version`).
-- `smoke_test_pack.json` — эталонные входы и выходы для тестов паритета.
+- `tokenizer/` — файлы токенизатора (`tokenizer.json`, `tokenizer_config.json`).
+- `preset_manifest.json` — параметры модели, токенизации, формулы скоринга, список `components` с SHA-256 и метрики сборки (`schema_version: $schema_version`).
+- `smoke_test_pack.json` — эталонные входы и выходы для тестов паритета (текст + fusion).
+
+### Дополнительные файлы (`v0.3.x-mobile`, `multimodal-v3`)
+> Примечание: это OCR+ASR мультимодальность (без visual encoder и без визуального `tag_bank`).
+- `ocr/` — `det.onnx` (PP-OCR детектор: BGR/RGB, resize с кратным 32, нормализация `(x/255 - mean)/std`, `thresh=0.3`, `box_thresh=0.5`), `inference.onnx` (`cyrillic_PP-OCRv5_mobile_rec_onnx`: высота 48, padding, нормализация `[-1, 1]`, CTC greedy decoding по `dict.txt`).
+- `asr/` — `GigaAM-CTC` (`model.int8.onnx` + `tokens.txt` для `sherpa-onnx:1.10.37` NeMo CTC: `sherpa-onnx` сам строит 80-dim log-mel fbank из 16 kHz mono float32 PCM, `blank_id` = последний токен в `tokens.txt`, чанкинг длинного аудио фиксированными окнами по 20–30 с на стороне клиента).
+- `gated_attention_fusion.onnx` — Query-Conditioned Attention Gate (единый ONNX-файл, ~0.1 МБ).
 
 ---
 
@@ -17,7 +27,7 @@
 Модель использует токенизатор XLM-RoBERTa:
 - Рекомендуется загружать `tokenizer/tokenizer.json` (через HuggingFace Tokenizers JNI или `onnxruntime-extensions`). При использовании `sentencepiece.bpe.model` напрямую необходимо учитывать сдвиг ID словаря XLM-R/Fairseq, иначе ID токенов не совпадут.
 - Префикс для поискового запроса: `"$q_prefix"`
-- Префикс для описания мема: `"$p_prefix"`
+- Префикс для текста документа (описание, OCR, ASR): `"$p_prefix"`
 - Параметры: `padding = "max_length"`, `truncation = true`, `max_length = $max_sequence_length`.
 - Спецтокены: `<s> = $sp_bos`, `<pad> = $sp_pad`, `</s> = $sp_eos`, `<unk> = $sp_unk`.
 
@@ -25,12 +35,35 @@
 
 ---
 
-## 3. Формула гибридного скоринга
-Перед сложением оба канала (Dense cosine similarity и BM25) нормализуются через Min-Max по всем кандидатам для каждого запроса в диапазон `[0.0, 1.0]`:
+## 3. Скоринг и индексация
 
-`score = $w_dense * min_max_norm(cosine) + $w_bm25 * min_max_norm(bm25)`
+Перед объединением все каналы нормализуются через Min-Max по всем кандидатам для каждого запроса в диапазон `[0.0, 1.0]`:
 
-где `min_max_norm(x_i) = (x_i - min(x)) / max(max(x) - min(x), 1e-9)`.
+`min_max_norm(x_i) = (x_i - min(x)) / max(max(x) - min(x), 1e-9)`
+
+### Текстовый профиль (`v0.2.0-mobile`)
+`score = 0.501 * min_max_norm(cosine) + 0.499 * min_max_norm(bm25)`
+
+### Мультимодальный профиль (`v0.3.x-mobile`, `multimodal-v3`)
+**Индексация при импорте (в фоне через `WorkManager`):**
+- Сохранить `ocr_text` (картинки: `raw`; видео/GIF: `uniform_3` кадров с дедупликацией строк) и `asr_text` в SQLite + `FTS5`.
+- **Чанкинг аудио и таймкоды (GigaAM-CTC без VAD):**
+  - Длинные аудиодорожки делятся на последовательные неперекрывающиеся окна по 20–30 секунд (например, 25 с).
+  - Для каждого окна запускается `sherpa-onnx` `OfflineRecognizer` (`from_nemo_ctc`).
+  - Текст каждого чанка сохраняется в таблицу чанков с `timestamp_ms = chunk_index * chunk_duration_ms`.
+  - Суммарный объединенный текст дорожки сохраняется в `asr_text` документа.
+- Закодировать через `text_encoder_int8.onnx` до 3 отдельных векторов `float[384]` на мем:
+  - `vec_meta` = `e5(user_caption + tags)`
+  - `vec_ocr` = `e5(ocr_text)` *(если не пустой)*
+  - `vec_asr` = `e5(asr_text)` *(если не пустой)*
+
+**Поиск и контракт `gated_attention_fusion.onnx`:**
+1. Посчитать 4 канала скоров: `s0 = BM25/FTS5`, `s1 = cosine(q, vec_meta)`, `s2 = cosine(q, vec_ocr)`, `s3 = cosine(q, vec_asr)`.
+2. Нормализовать каждый канал по текущему запросу в `[0, 1]` (`min-max`).
+3. Сформировать `channel_mask` `[n_docs, 4]` (`bool`): столбцы 0 и 1 всегда `true`, столбец 2 = `ocr_text.isNotBlank()`, столбец 3 = `asr_text.isNotBlank()`.
+4. Прогнать `gated_attention_fusion.onnx`:
+   - Входы: `query_emb` `[n_queries, 384]` (`float32`), `channel_scores` `[n_queries, n_docs, 4]` (`float32`), `channel_mask` `[n_docs, 4]` (`bool`).
+   - Выход: `fused_scores` `[n_queries, n_docs]` (`float32`).
 
 ---
 
@@ -40,6 +73,8 @@
 ```kotlin
 dependencies {
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.17.1")
+    // sherpa-onnx для офлайн-распознавания GigaAM-CTC (версия согласована для NeMo CTC)
+    implementation("com.k2fsa.sherpa.onnx:sherpa-onnx:1.10.37")
 }
 ```
 
@@ -119,54 +154,63 @@ class SimpleBm25Engine(
     private val tokenRegex = Regex("[^\\p{L}\\p{N}_]+")
     private val docTokens: List<List<String>> = documents.map { tokenize(it) }
     private val docLengths: IntArray = docTokens.map { it.size }.toIntArray()
-    private val avgdl: Double = docLengths.average().takeIf { !it.isNaN() && it > 0 } ?: 1.0
-    private val idf: Map<String, Double>
-
-    init {
-        val n = documents.size
-        val df = mutableMapOf<String, Int>()
-        for (tokens in docTokens) {
-            for (term in tokens.toSet()) df[term] = (df[term] ?: 0) + 1
-        }
-        val rawIdf = mutableMapOf<String, Double>()
-        val negTerms = mutableListOf<String>()
-        var idfSum = 0.0
-        for ((term, freq) in df) {
-            val score = ln((n - freq + 0.5) / (freq + 0.5))
-            rawIdf[term] = score
-            idfSum += score
-            if (score < 0) negTerms.add(term)
-        }
-        val avgIdf = if (df.isNotEmpty()) idfSum / df.size else 0.0
-        val epsIdf = epsilon * avgIdf
-        for (term in negTerms) rawIdf[term] = epsIdf
-        idf = rawIdf
-    }
+    private val avgDocLen: Double = if (docLengths.isNotEmpty()) docLengths.average() else 0.0
+    private val idf: Map<String, Double> = computeIdf(documents.size)
 
     fun tokenize(text: String): List<String> =
-        text.lowercase().split(tokenRegex).filter { it.length > 1 }
+        tokenRegex.split(text.lowercase()).filter { it.length >= 2 }
+
+    private fun computeIdf(corpusSize: Int): Map<String, Double> {
+        val docFreq = HashMap<String, Int>()
+        for (tokens in docTokens) {
+            for (t in tokens.toSet()) docFreq[t] = (docFreq[t] ?: 0) + 1
+        }
+        val rawIdf = HashMap<String, Double>()
+        val negativeWords = ArrayList<String>()
+        var idfSum = 0.0
+        for ((word, freq) in docFreq) {
+            val score = ln((corpusSize - freq + 0.5) / (freq + 0.5))
+            rawIdf[word] = score
+            idfSum += score
+            if (score < 0) negativeWords.add(word)
+        }
+        val averageIdf = if (rawIdf.isNotEmpty()) idfSum / rawIdf.size else 0.0
+        val epsValue = epsilon * averageIdf
+        for (word in negativeWords) rawIdf[word] = epsValue
+        return rawIdf
+    }
 
     fun scoreAll(query: String): FloatArray {
         val qTokens = tokenize(query)
-        return FloatArray(docTokens.size) { docIdx ->
-            val tokens = docTokens[docIdx]
-            val dl = docLengths[docIdx]
-            var score = 0.0
-            for (q in qTokens) {
-                val termIdf = idf[q] ?: continue
-                val tf = tokens.count { it == q }.toDouble()
-                score += termIdf * (tf * (k1 + 1.0)) / (tf + k1 * (1.0 - b + b * dl / avgdl))
+        val scores = FloatArray(docTokens.size)
+        for (i in docTokens.indices) {
+            val dTokens = docTokens[i]
+            val dLen = docLengths[i]
+            val tf = HashMap<String, Int>()
+            for (t in dTokens) tf[t] = (tf[t] ?: 0) + 1
+            var sum = 0.0
+            for (qt in qTokens) {
+                val freq = tf[qt] ?: continue
+                val wordIdf = idf[qt] ?: continue
+                val num = freq * (k1 + 1.0)
+                val den = freq + k1 * (1.0 - b + b * dLen / avgDocLen)
+                sum += wordIdf * (num / den)
             }
-            score.toFloat()
+            scores[i] = sum.toFloat()
         }
+        return scores
     }
 }
 ```
 
 ---
 
-## 5. Проверка паритета (`smoke_test_pack.json`)
-- `samples`: `input_ids`, `attention_mask`, `bm25_tokens`, `embedding_head`, `full_embedding`.
+## 5. Проверка интеграции (`smoke_test_pack.json`)
+- `tokenization_tests`: эталонные `input_ids` и `attention_mask` для нескольких запросов.
+- `embedding_tests`: ожидаемый срез первых 8 компонент `embedding_head` и полный `full_embedding` (384D).
 - `similarity_tests`: ожидаемые значения косинусного сходства.
 - `hybrid_ranking_tests`: эталонный расчёт `dense_raw_scores`, `dense_norm_scores`, `bm25_raw_scores`, `bm25_norm_scores`, `hybrid_scores` и `expected_ranking` по 4 документам.
+- `fusion_tests`: эталонный расчёт `fused_scores` для `gated_attention_fusion.onnx` по `query_emb`, `channel_scores` и `channel_mask`.
+- `ocr_tests`: эталонный тест OCR (base64 PNG кропа с текстом и `expected_text`).
+- `asr_tests`: эталонные тесты ASR (тест на тишину с `expected_text: ""` и короткий речевой тест 16 kHz WAV с `expected_text: "и сказки конец"` для подтверждения инференса речи на Android).
 $prov_section

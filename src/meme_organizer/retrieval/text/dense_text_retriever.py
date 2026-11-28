@@ -31,6 +31,7 @@ class DenseTextRetriever(BaseRetriever):
         passage_prefix: str = "",
         cache_dir: Path = Path(".cache/models/hf"),
         mlflow_run_name: str | None = None,
+        mlflow_experiment_name: str | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(model_name, **kwargs)
@@ -41,6 +42,7 @@ class DenseTextRetriever(BaseRetriever):
         self.passage_prefix = passage_prefix
         self.cache_dir = cache_dir
         self.mlflow_run_name = mlflow_run_name
+        self.mlflow_experiment_name = mlflow_experiment_name
 
         self._tokenizer: Any = None
         self._model: Any = None
@@ -54,8 +56,8 @@ class DenseTextRetriever(BaseRetriever):
             return
 
         logger.info("Загрузка FP32 модели %s (%s)...", self.model_name, self.hf_model_id)
-        self._tokenizer = AutoTokenizer.from_pretrained(self.hf_model_id)
-        self._model = AutoModel.from_pretrained(self.hf_model_id)
+        self._tokenizer = AutoTokenizer.from_pretrained(self.hf_model_id, revision="main")  # nosec B615
+        self._model = AutoModel.from_pretrained(self.hf_model_id, revision="main")  # nosec B615
 
     @staticmethod
     def _is_mlflow_reachable(tracking_uri: str) -> bool:
@@ -81,7 +83,8 @@ class DenseTextRetriever(BaseRetriever):
                 logger.info("MLflow сервер (%s) недоступен, пропускаем загрузку.", cfg.mlflow_tracking_uri)
                 return False
             client = mlflow.tracking.MlflowClient(cfg.mlflow_tracking_uri)
-            exp = client.get_experiment_by_name(cfg.experiment_name)
+            exp_name = self.mlflow_experiment_name or cfg.experiment_name
+            exp = client.get_experiment_by_name(exp_name)
             if not exp:
                 return False
 
@@ -96,7 +99,8 @@ class DenseTextRetriever(BaseRetriever):
 
             run_id = runs[0].info.run_id
             artifacts = client.list_artifacts(run_id)
-            if not any(a.path == "hf_model" for a in artifacts):
+            artifact_name = next((a.path for a in artifacts if a.path in ("model", "hf_model")), None)
+            if artifact_name is None:
                 return False
 
             dest_dir = self.cache_dir / "mlflow_downloaded" / run_id[:8]
@@ -104,13 +108,13 @@ class DenseTextRetriever(BaseRetriever):
             local_dir = Path(
                 mlflow.artifacts.download_artifacts(
                     run_id=run_id,
-                    artifact_path="hf_model",
+                    artifact_path=artifact_name,
                     dst_path=str(dest_dir),
                     tracking_uri=cfg.mlflow_tracking_uri,
                 )
             )
-            self._tokenizer = AutoTokenizer.from_pretrained(str(local_dir))
-            self._model = AutoModel.from_pretrained(str(local_dir))
+            self._tokenizer = AutoTokenizer.from_pretrained(str(local_dir))  # nosec B615
+            self._model = AutoModel.from_pretrained(str(local_dir))  # nosec B615
             self._loaded_from_mlflow = True
             logger.info("Загружена чистая FP32 модель из MLflow (run=%s): %s", run_id[:8], local_dir)
         except Exception as exc:  # noqa: BLE001
