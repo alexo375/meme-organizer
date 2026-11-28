@@ -49,6 +49,13 @@ class OnnxQuantizer:
             weight_type=QuantType.QInt8,
         )
 
+        # Enforce ONNX IR version <= 9 for Android onnxruntime-android 1.17.1 compatibility
+        import onnx
+        model_proto = onnx.load(str(int8_onnx_path), load_external_data=True)
+        if model_proto.ir_version > 9:
+            model_proto.ir_version = 9
+            onnx.save_model(model_proto, str(int8_onnx_path), save_as_external_data=False)
+
         if cleanup_fp32:
             fp32_onnx_path.unlink(missing_ok=True)
             data_file = fp32_onnx_path.with_name(f"{fp32_onnx_path.name}.data")

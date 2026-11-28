@@ -7,6 +7,7 @@ import tarfile
 from typing import TYPE_CHECKING
 
 import numpy as np
+import onnx
 import onnxruntime
 import pytest
 import torch
@@ -67,6 +68,10 @@ def test_onnx_exporter_in_graph_pooling(tmp_path: Path) -> None:
     )
     assert onnx_path.exists()
     assert not fp32_path.exists()
+
+    import onnx
+    model_proto = onnx.load(str(onnx_path))
+    assert model_proto.ir_version <= 9, f"IR version {model_proto.ir_version} must be <= 9 for ORT 1.17.1"
 
     session = onnxruntime.InferenceSession(str(onnx_path), providers=["CPUExecutionProvider"])
     inputs = tokenizer("тестовый запрос", padding="max_length", max_length=32, return_tensors="np")
@@ -216,6 +221,14 @@ def test_mobile_bundle_builder(tmp_path: Path, dummy_profile: ModelBundleProfile
         assert len(smoke_pack.samples) == 8
         assert len(smoke_pack.similarity_tests) == 4
         assert len(smoke_pack.hybrid_ranking_tests) == 4
+
+        # Verify all ONNX files inside the bundle archive have IR version <= 9
+        for member in tar.getmembers():
+            if member.name.endswith(".onnx"):
+                extracted = tar.extractfile(member)
+                assert extracted is not None
+                proto = onnx.load_model_from_string(extracted.read())
+                assert proto.ir_version <= 9, f"{member.name} has ir_version {proto.ir_version} > 9"
 
         # Validate README contains MinMax, SimpleBm25Engine, and exact weights
         readme_file = tar.extractfile(f"{root}/README.md")

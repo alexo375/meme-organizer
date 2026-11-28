@@ -7,7 +7,8 @@
 ## 1. Состав пакета
 
 ### Базовые файлы (`v0.2.0-mobile` и `v0.3.x-mobile`)
-- `text_encoder_int8.onnx` — модель `$model_name` в формате ONNX (Dynamic INT8).
+Все ONNX-модели в бандле предоставляются с ONNX IR версии <= 9 для нативной совместимости с `onnxruntime-android:1.17.1` и `sherpa-onnx:1.10.37`.
+- `text_encoder_int8.onnx` — модель `$model_name` в формате ONNX (Dynamic INT8, IR v9).
   - Mean Pooling и L2-нормализация встроены в ONNX-граф.
   - Входы: `input_ids` `[batch, $max_sequence_length]` (`int64`), `attention_mask` `[batch, $max_sequence_length]` (`int64`).
   - Выход: `sentence_embedding` `[batch, $embedding_dimension]` (`float32`), L2-норма = `1.0`.

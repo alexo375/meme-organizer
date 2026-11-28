@@ -94,6 +94,8 @@ class GatedAttentionFusion(nn.Module):
             opset_version=17,
         )
         model_proto = onnx.load(output_path, load_external_data=True)
+        if model_proto.ir_version > 9:
+            model_proto.ir_version = 9
         onnx.save_model(model_proto, output_path, save_as_external_data=False)
         data_file = Path(f"{output_path}.data")
         if data_file.exists():

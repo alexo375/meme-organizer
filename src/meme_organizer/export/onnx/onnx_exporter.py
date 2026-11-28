@@ -123,6 +123,13 @@ class OnnxExporter:
             do_constant_folding=True,
         )
 
+        # Enforce ONNX IR version <= 9 for Android onnxruntime-android 1.17.1 compatibility
+        import onnx
+        model_proto = onnx.load(str(fp32_onnx_path), load_external_data=True)
+        if model_proto.ir_version > 9:
+            model_proto.ir_version = 9
+            onnx.save_model(model_proto, str(fp32_onnx_path), save_as_external_data=False)
+
         _ = onnxruntime.InferenceSession(str(fp32_onnx_path), providers=["CPUExecutionProvider"])
         size_mb = fp32_onnx_path.stat().st_size / (1024 * 1024)
         logger.info("FP32 ONNX модель готова: %s (размер: %.2f МБ)", fp32_onnx_path, size_mb)

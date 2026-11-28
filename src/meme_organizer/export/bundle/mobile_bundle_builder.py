@@ -194,6 +194,19 @@ class MobileBundleBuilder:
 
     def _archive_bundle(self, output_tar: Path | None) -> Path:
         """Архивирует собранную директорию бандла в tar.gz."""
+        # Ensure all ONNX models satisfy max IR version <= 9 for onnxruntime-android 1.17.1 compatibility
+        import onnx
+        for onnx_file in self.bundle_dir.rglob("*.onnx"):
+            proto = onnx.load(str(onnx_file), load_external_data=False)
+            if proto.ir_version > 9:
+                logger.warning(
+                    "Модель %s имела ONNX IR version %d > 9. Снижаем до 9 для ORT 1.17.1...",
+                    onnx_file.relative_to(self.bundle_dir),
+                    proto.ir_version,
+                )
+                proto.ir_version = 9
+                onnx.save_model(proto, str(onnx_file), save_as_external_data=False)
+
         if output_tar is None:
             output_tar = self.work_dir / f"meme-organizer-{self.profile.profile_id}.tar.gz"
         output_tar.parent.mkdir(parents=True, exist_ok=True)
