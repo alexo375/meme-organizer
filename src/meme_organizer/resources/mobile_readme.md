@@ -18,7 +18,7 @@
 ### Дополнительные файлы (`v0.3.x-mobile`, `multimodal-v3`)
 > Примечание: это OCR+ASR мультимодальность (без visual encoder и без визуального `tag_bank`).
 - `ocr/` — `det.onnx` (PP-OCR детектор: BGR/RGB, resize с кратным 32, нормализация `(x/255 - mean)/std`, `thresh=0.3`, `box_thresh=0.5`), `inference.onnx` (`cyrillic_PP-OCRv5_mobile_rec_onnx`: высота 48, padding, нормализация `[-1, 1]`, CTC greedy decoding по `dict.txt`).
-- `asr/` — `GigaAM-CTC` (`model.int8.onnx` + `tokens.txt` для `sherpa-onnx` NeMo CTC: `sherpa-onnx` сам строит 80-dim log-mel fbank из 16 kHz mono float32 PCM, `blank_id` = последний токен в `tokens.txt`, чанкинг длинного аудио по 20–30 с на стороне клиента).
+- `asr/` — `GigaAM-CTC` (`model.int8.onnx` + `tokens.txt` для `sherpa-onnx:1.10.37` NeMo CTC: `sherpa-onnx` сам строит 80-dim log-mel fbank из 16 kHz mono float32 PCM, `blank_id` = последний токен в `tokens.txt`, чанкинг длинного аудио фиксированными окнами по 20–30 с на стороне клиента).
 - `gated_attention_fusion.onnx` — Query-Conditioned Attention Gate (единый ONNX-файл, ~0.1 МБ).
 
 ---
@@ -46,7 +46,12 @@
 
 ### Мультимодальный профиль (`v0.3.x-mobile`, `multimodal-v3`)
 **Индексация при импорте (в фоне через `WorkManager`):**
-- Сохранить `ocr_text` (картинки: `raw`; видео/GIF: `uniform_3` кадров с дедупликацией строк) и `asr_text` (моно 16 kHz PCM из видео) в SQLite + `FTS5`.
+- Сохранить `ocr_text` (картинки: `raw`; видео/GIF: `uniform_3` кадров с дедупликацией строк) и `asr_text` в SQLite + `FTS5`.
+- **Чанкинг аудио и таймкоды (GigaAM-CTC без VAD):**
+  - Длинные аудиодорожки делятся на последовательные неперекрывающиеся окна по 20–30 секунд (например, 25 с).
+  - Для каждого окна запускается `sherpa-onnx` `OfflineRecognizer` (`from_nemo_ctc`).
+  - Текст каждого чанка сохраняется в таблицу чанков с `timestamp_ms = chunk_index * chunk_duration_ms`.
+  - Суммарный объединенный текст дорожки сохраняется в `asr_text` документа.
 - Закодировать через `text_encoder_int8.onnx` до 3 отдельных векторов `float[384]` на мем:
   - `vec_meta` = `e5(user_caption + tags)`
   - `vec_ocr` = `e5(ocr_text)` *(если не пустой)*
@@ -68,6 +73,8 @@
 ```kotlin
 dependencies {
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.17.1")
+    // sherpa-onnx для офлайн-распознавания GigaAM-CTC (версия согласована для NeMo CTC)
+    implementation("com.k2fsa.sherpa.onnx:sherpa-onnx:1.10.37")
 }
 ```
 
@@ -205,5 +212,5 @@ class SimpleBm25Engine(
 - `hybrid_ranking_tests`: эталонный расчёт `dense_raw_scores`, `dense_norm_scores`, `bm25_raw_scores`, `bm25_norm_scores`, `hybrid_scores` и `expected_ranking` по 4 документам.
 - `fusion_tests`: эталонный расчёт `fused_scores` для `gated_attention_fusion.onnx` по `query_emb`, `channel_scores` и `channel_mask`.
 - `ocr_tests`: эталонный тест OCR (base64 PNG кропа с текстом и `expected_text`).
-- `asr_tests`: эталонный тест ASR (16 kHz PCM-фрагмент и `expected_text` / `expected_segments`).
+- `asr_tests`: эталонные тесты ASR (тест на тишину с `expected_text: ""` и короткий речевой тест 16 kHz WAV с `expected_text: "и сказки конец"` для подтверждения инференса речи на Android).
 $prov_section

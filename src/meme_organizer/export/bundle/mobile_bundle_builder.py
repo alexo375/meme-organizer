@@ -294,10 +294,15 @@ class MobileBundleBuilder:
                 name="asr",
                 path="asr/model.int8.onnx",
                 sha256=self._compute_sha256(asr_dst / "model.int8.onnx"),
-                runtime="sherpa-onnx",
+                runtime="sherpa-onnx:1.10.37",
                 inputs=[{"name": "audio_signal", "dtype": "float32", "shape": ["batch", 80, "frames"]}],
                 outputs=[{"name": "logprobs", "dtype": "float32", "shape": ["batch", "t", "vocab"]}],
-                preprocessing={"sample_rate": 16000, "pcm": "mono_float32", "fbank_by": "sherpa-onnx"},
+                preprocessing={
+                    "sample_rate": 16000,
+                    "pcm": "mono_float32",
+                    "fbank_by": "sherpa-onnx",
+                    "chunk_seconds": 25,
+                },
                 auxiliary_files=asr_aux,
             )
         )
@@ -378,21 +383,37 @@ class MobileBundleBuilder:
             }
         ]
 
-        wav_buf = io.BytesIO()
-        pcm = np.zeros(8000, dtype=np.int16)
-        with wave.open(wav_buf, "wb") as wf:
+        wav_silence_buf = io.BytesIO()
+        pcm_silence = np.zeros(8000, dtype=np.int16)
+        with wave.open(wav_silence_buf, "wb") as wf:
             wf.setnchannels(1)
             wf.setsampwidth(2)
             wf.setframerate(16000)
-            wf.writeframes(pcm.tobytes())
-        pack["asr_tests"] = [
+            wf.writeframes(pcm_silence.tobytes())
+
+        asr_tests = [
             {
+                "case": "silence",
                 "sample_rate": 16000,
-                "wav_base64": base64.b64encode(wav_buf.getvalue()).decode("ascii"),
+                "wav_base64": base64.b64encode(wav_silence_buf.getvalue()).decode("ascii"),
                 "expected_text": "",
                 "expected_segments": [],
             }
         ]
+
+        speech_wav_path = Path(__file__).resolve().parent.parent.parent / "resources" / "speech_sample_16k.wav"
+        if speech_wav_path.exists():
+            asr_tests.append(
+                {
+                    "case": "speech_phrase",
+                    "sample_rate": 16000,
+                    "wav_base64": base64.b64encode(speech_wav_path.read_bytes()).decode("ascii"),
+                    "expected_text": "и сказки конец",
+                    "expected_segments": ["и сказки конец"],
+                }
+            )
+
+        pack["asr_tests"] = asr_tests
         smoke_path.write_text(json.dumps(pack, ensure_ascii=False, indent=2), encoding="utf-8")
 
     @staticmethod
